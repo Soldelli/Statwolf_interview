@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 from os import getcwd
-import sys
+from sys import exit, exc_info
 import random as rnd
 import matplotlib
 import datetime
@@ -31,7 +31,7 @@ def load_data(filename):
         income = df['y'].values
     except:
         print('Some error occurred during data loading.')
-        sys.exit(0)
+        exit(0)
 
     print('Data successfully loaded')
     # check for missing values in data
@@ -41,7 +41,22 @@ def load_data(filename):
     if missing_dates_values:
         print('Number of missing income values '+ str(missing_dates_values)+ ' out of ' +str(len(dates))+ ' entries')
 
+    #conversion to datetimes
+    for i in range(len(dates)):
+        dates[i] = datetime.date(year= int(dates[i][0:4]), month = int(dates[i][5:7]), day= int(dates[i][8:10]))
+    # determine delta between days
+    delta = []
+    for i in range(len(dates)-1):
+        delta.append(dates[i+1]- dates[i])
+        if delta[-1].days > 1:
+            print(dates[i],dates[i+1],)
+    #sum of deltas
+    temp=0
+    for i in range(len(delta)): temp+=delta[i].days
+    print('Number of missing days ',temp-len(delta))
+
     return dates, income
+
 
 def pre_processing(income_new,nan_rm_tech):
     ''' The function perform data preprocessing, addressing missing values and normalization problems.
@@ -82,17 +97,35 @@ def pre_processing(income_new,nan_rm_tech):
     # data normalization, scale data between 0 and 1
     income_new = income_new.reshape(-1,1)
     min_max_scaler = preprocessing.MinMaxScaler()
-    min_max_scaler.fit(income_new)
-    income_new = min_max_scaler.transform(income_new)
+    income_new = min_max_scaler.fit_transform(income_new)
 
     # scaler save to file
     joblib.dump(min_max_scaler, output_path+'\\models\\scaler.pkl')
     return income_new, nan_idx
 
 
-def model_training():
-    a=0
-    return a
+def model_training(x, prediction_lenght, select_model):
+    train_idx = len(x)//2
+    valid_idx = len(x)//4 + train_idx
+    x_train = x[0:train_idx]
+    x_validation = x[train_idx:valid_idx]
+
+    print(len(x),len(x_train),len(x_validation))
+
+    # regression model
+    # if model == 0:
+    #     #neural network parameters
+    #     num_neurons_per_layer = [10,20,10,prediction_lenght]
+    #     activation_functions = ['relu']
+    #     bias = 1
+    #     weights = 1
+    #
+    #
+    #
+    # if model == 1:
+    #     print('To be done. Probabilmente XGBoost')
+
+
 
 def test():
     a=0
@@ -109,7 +142,7 @@ def data_exploration(dates, income_new, nan_idx,nan_rm_tech, save_figure):
     plt.plot(x,income_new,linewidth=0.5, marker='o', markersize=1)
 
     plt.plot(x[nan_idx], income_new[nan_idx],  color='red', marker='o', markersize=2, linestyle='')
-    if save:
+    if save_figure:
         plt.savefig(output_path+'\\images\\data_exploration_'+str(nan_rm_tech)+'.pdf', bbox_inches='tight')
         plt.close()
     else:
@@ -121,13 +154,16 @@ if __name__ == '__main__':
     # Parameters
     filename = 'ts_forecast.csv'
     save_figure = False
-    nan_rm_tech = 0     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre and post vale
-                        # 3- windowed mean
+    nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
+                        # and post vale 3- windowed mean
+    prediction_lenght = 30
+    select_model = 0     # 0 neural network, 1 other model
 
     # Functions call
     dates, income = load_data(filename)
     income_new, nan_idx = pre_processing(income,nan_rm_tech)
 
     data_exploration(dates,income_new,nan_idx,nan_rm_tech, save_figure)
+    model_training(income_new, prediction_lenght, select_model)
 
     # to load: scaler = joblib.load(output+'\\models\\scaler.pkl)'
