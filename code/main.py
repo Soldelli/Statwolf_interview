@@ -44,7 +44,19 @@ def load_data(filename):
     return dates, income
 
 def pre_processing(income_new,nan_rm_tech):
-    '''The function perform data preprocessing, addressing missing values and normalization problems.'''
+    ''' The function perform data preprocessing, addressing missing values and normalization problems.
+
+    Missing values are added through different techniques, depending on the nan_rm_tech parameters which
+    sele specifiesd technique.
+    0 - Fill the gaps with the mean value of the feature
+    1 - Fill the gaps with the median of the feature, more resilient to outliers
+    2 - Linear interpolation, or average of neighbor values.
+    3 - Windowed linear interpolation, or windowed average of neighbor values
+
+    Features are rescaled in the range [0-1]
+
+    Outputs: preprocessed features and list of nan indicies (for later use in data_exploration)'''
+
     # address missing value problem
     nan_idx = np.where(np.isnan(income_new))[0] # nan idx determination
 
@@ -88,7 +100,7 @@ def test():
 
 
 def data_exploration(dates, income_new, nan_idx,nan_rm_tech, save_figure):
-    '''Plot of income variable, missing values (which have been previously added) are enlighted '''
+    '''Plot of income variable, missing values (which have been previously added) are enlightened '''
     plt.figure()
     plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
     plt.grid(True), plt.hold
