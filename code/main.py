@@ -1,14 +1,25 @@
 # import libraries
 import numpy as np
 import pandas as pd
-from os import getcwd
-from sys import exit, exc_info
+from os import getcwd, sep
+from sys import exit, exc_info, platform
 import random as rnd
 import matplotlib
 import datetime
 from sklearn import preprocessing
+from sklearn.model_selection import train_test_split
 from sklearn.externals import joblib
 import matplotlib.pyplot as plt
+
+
+# neural network
+import keras
+from keras.models       import Model, Sequential
+from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten
+from keras.optimizers   import Nadam
+from keras.initializers import Constant, VarianceScaling
+from keras.callbacks    import TensorBoard
+from keras              import backend as K
 
 
 # Directory path
@@ -26,12 +37,16 @@ def load_data(filename):
     Outputs: two numpy array, extracted from the file'''
 
     try:
-        df = pd.read_csv(filepath_or_buffer=data_path+'\\'+ filename, sep=',')      # read data file
-        dates = df['DATE'].values                   # separate the two features
+        print(data_path + sep + filename)
+        df = pd.read_csv(filepath_or_buffer=data_path + sep + filename, sep=',')  # read data file
+        #dates = pd.to_datetime(df['DATE'])  # separate the two features
+        dates  = df['DATE'].values           # separate the two features
         income = df['y'].values
     except:
         print('Some error occurred during data loading.')
         exit(0)
+
+
     print('Data successfully loaded')
 
     return dates, income
@@ -57,19 +72,19 @@ def pre_processing(dates, income, nan_rm_tech):
 
     # conversion of first feature (dates) to datetimes and fill missing dates
     for i in range(len(dates)):
-        dates[i] = datetime.date(year=int(dates[i][0:4]), month=int(dates[i][5:7]), day=int(dates[i][8:10]))
+        dates[i] = datetime.datetime.strptime(dates[i], "%Y-%m-%d").date()
 
     # dates filling procedure
     dates_temp, income_temp, missing_days = [], [], []  # temp variables for dates filling procedure
     for i in range(len(dates) - 1):
-        dates_temp.append(dates[i])  # append real value
-        income_temp.append(income[i])  # append real value
+        dates_temp.append(dates[i])             # append real value
+        income_temp.append(income[i])           # append real value
         if (dates[i + 1] - dates[i]).days > 1:  # previously verified that only single days are missing,
             # no consequenly missing dates are present in the dataset
             missing_days.append(dates[i] + datetime.timedelta(days=1))  # save missing days for later displays
-            dates_temp.append(missing_days[-1])  # append missing date
-            income_temp.append(np.nan)  # append nan value related to missing date
-    dates_temp.append(dates[-1])  # append last value
+            dates_temp.append(missing_days[-1]) # append missing date
+            income_temp.append(np.nan)          # append nan value related to missing date
+    dates_temp.append(dates[-1])                # append last value
     income_temp.append(income[-1])
 
     dates, income = np.asarray(dates_temp), np.asarray(income_temp)  # overwrite variables
@@ -111,35 +126,153 @@ def pre_processing(dates, income, nan_rm_tech):
     income = min_max_scaler.fit_transform(income)
 
     # scaler saved to file --------------------------------------------------
-    joblib.dump(min_max_scaler, output_path+'\\models\\scaler.pkl')
+
+    joblib.dump(min_max_scaler, output_path +sep+'models'+sep+'scaler.pkl')
+
     return dates, income, nan_idx
 
 
+def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
+	"""
+	Frame a time series as a supervised learning dataset.
+	Arguments:
+		data: Sequence of observations as a list or NumPy array.
+		n_in: Number of lag observations as input (X).
+		n_out: Number of observations as output (y).
+		dropnan: Boolean whether or not to drop rows with NaN values.
+	Returns:
+		Pandas DataFrame of series framed for supervised learning.
+	"""
+	n_vars = 1 if type(data) is list else data.shape[1]
+	df = pd.DataFrame(data)
+	cols, names = list(), list()
+	# input sequence (t-n, ... t-1)
+	for i in range(n_in, 0, -1):
+		cols.append(df.shift(i))
+		names += [('var%d(t-%d)' % (j+1, i)) for j in range(n_vars)]
+	# forecast sequence (t, t+1, ... t+n)
+	for i in range(0, n_out):
+		cols.append(df.shift(-i))
+		if i == 0:
+			names += [('var%d(t)' % (j+1)) for j in range(n_vars)]
+		else:
+			names += [('var%d(t+%d)' % (j+1, i)) for j in range(n_vars)]
+	# put it all together
+	agg = pd.concat(cols, axis=1)
+	agg.columns = names
+	# drop rows with NaN values
+	if dropnan:
+		agg.dropna(inplace=True)
+	return agg
+
 def model_training(x, prediction_lenght, select_model):
-    train_idx = len(x)//2
-    valid_idx = len(x)//4 + train_idx
-    x_train = x[0:train_idx]
-    x_validation = x[train_idx:valid_idx]
+    # model parameters -------------------------------------------------------------------------------------------------
+    num_features = 1
+    input_window_size  = 10  # number of samples per channel used to feed the NN
+    output_window_size = 30
+    batch_size         = 100
+    training_epochs    = 40
 
-    print(len(x),len(x_train),len(x_validation))
-
-    # regression model
-    # if model == 0:
-    #     #neural network parameters
-    #     num_neurons_per_layer = [10,20,10,prediction_lenght]
-    #     activation_functions = ['relu']
-    #     bias = 1
-    #     weights = 1
-    #
-    #
-    #
-    # if model == 1:
-    #     print('To be done. Probabilmente XGBoost')
+    # Training set construction ----------------------------------------------------------------------------------------
+    # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
+    # time series
+    dataset = np.asarray(series_to_supervised(x, n_in=input_window_size,
+                                              n_out=output_window_size, dropnan=True).values.tolist())
+    # The previously obtained dataset is divided into training and testing examples
+    X_train, X_test, y_train, y_test = train_test_split( dataset[:,:input_window_size], dataset[:,input_window_size:],
+                                                        test_size = 0.20, random_state = 42)
+    print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 
 
-def test():
-    a=0
-    return a
+    # Neural Network parameters ----------------------------------------------------------------------------------------
+    RNN_neurons = [30, 20]  # Defines the number of neurons of the recurrent layers
+    full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
+    dropout     = [0,0,0.1]  # Definition of Dropout probabilities
+    activation  = ['relu', 'tanh']
+
+    # Definition of initializers for the weigths and biases of the dense layers.
+    kernel_init = VarianceScaling(scale=1.0, mode='fan_avg', distribution='normal', seed=None)
+    bias_init = Constant(value=0.1)
+
+
+    # Neural Network model ---------------------------------------------------------------------------------------------
+    model = Sequential()
+
+
+    # Layer 1
+    model.add(GRU(units            = RNN_neurons[0],
+                  activation       = activation[1],  # tanh
+                  kernel_initializer=kernel_init,
+                  use_bias         = True,
+                  bias_initializer = bias_init,
+                  dropout          = dropout[0],
+                  return_sequences = True,  # set to true is following layer is recurrent
+                  input_shape      = (batch_size, input_window_size, num_features),
+                  batch_input_shape= [None, input_window_size, num_features],
+                  batch_size       = None,
+                  stateful         = False))
+
+    # Layer 2
+    model.add(GRU(units            = RNN_neurons[1],
+                  activation       = activation[1],
+                  kernel_initializer=kernel_init,
+                  use_bias         = True,
+                  bias_initializer = bias_init,
+                  dropout          = dropout[1],
+                  return_sequences = False,  # set to true is following layer is recurrent
+                  stateful         = False))
+
+    model.add(Flatten())
+
+
+    # Layer 3
+    model.add(Dense(units      = full_conn[1],
+                    activation = 'linear',
+                    use_bias   = True,
+                    kernel_initializer = kernel_init,
+                    bias_initializer   = bias_init))
+    #model.add(Reshape((output_window_size, num_channels)))
+
+    # Optimizer setup --------------------------------------------------------------------------------------------------
+    opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+
+
+    model.compile(optimizer = opt,
+                  loss      = 'mse',    # Loss function specification - MSE
+                  metrics   = ['acc'])  # additional metric of analysis - ACCURACY, not suited for regression
+    # purposes, but still usefull in debugging
+
+
+    # Callback definition for tensorboard usage ------------------------------------------------------------------------
+    tbCallback = TensorBoard(log_dir=output_path+sep+'models'+sep, histogram_freq=0,
+                             batch_size=batch_size, write_graph=True,
+                             write_grads=True, write_images=False,
+                             embeddings_freq=0, embeddings_layer_names=None,
+                             embeddings_metadata=None)
+
+    # Training ---------------------------------------------------------------------------------------------------------
+
+    # If stateless RNN are used, standard fit is employed.
+    history = model.fit(x               =np.reshape(X_train,(X_train.shape[0],X_train.shape[1],1)),  # X data
+                        y               =np.reshape(y_train,(y_train.shape[0],y_train.shape[1],1)),  # Y data
+                        epochs          =training_epochs,      # number of fit iteration across all training set
+                        batch_size      =batch_size,           # number of training samples preprocessed in parallel.
+                        verbose         =2,                    # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
+                        validation_split=0.2,                  # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                        shuffle         =False,                # data is not shuffled from epoch to epoch.
+                        callbacks       =[tbCallback])         # save graph and other data for visualization with tensorboard.
+
+
+    # Model saving -----------------------------------------------------------------------------------------------------
+    model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
+
+    # Performances evaluation ------------------------------------------------------------------------------------------
+    #score = model.evaluate(np.asarray(x_val1), np.asarray(y_val1), verbose=0, batch_size=batch_size)
+    #content = 'Validation loss: ' + "{0:.5f}".format(score[0]) + ' - acc: ' + "{0:.4f}".format(score[1])
+
+    # Tensorboard invocation -------------------------------------------------------------------------------------------
+    os.system('tensorboard --logdir=' + save_path + ' --host=127.0.0.1')
+
 
 
 def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
@@ -155,11 +288,14 @@ def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
     plt.plot(x[nan_idx], income_new[nan_idx],  color='red', marker='o', markersize=2, linestyle='')
     plt.legend(['true values', 'fake values'], loc='upper right')
     if save_figure:
-        plt.savefig(output_path+'\\images\\data_exploration_'+str(nan_rm_tech)+'.pdf', bbox_inches='tight')
+        plt.savefig(output_path +sep+'images'+sep+'data_exploration_' + str(nan_rm_tech) + '.pdf', bbox_inches='tight')
         plt.close()
     else:
         plt.show()
 
+
+def prediction_visualization():
+    print('To be done')
 
 #Main
 if __name__ == '__main__':
@@ -178,4 +314,4 @@ if __name__ == '__main__':
     data_exploration(dates_new,income_new,nan_idx,nan_rm_tech, save_figure)
     model_training(income_new, prediction_lenght, select_model)
 
-    # to load: scaler = joblib.load(output+'\\models\\scaler.pkl)'
+    # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
