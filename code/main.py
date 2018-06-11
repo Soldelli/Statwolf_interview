@@ -15,7 +15,7 @@ import time
 import keras
 from keras.models       import Model, Sequential
 from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
-from keras.optimizers   import Nadam
+from keras.optimizers   import Nadam, SGD
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard
 from keras              import backend as K
@@ -183,6 +183,9 @@ def model_training(x, prediction_lenght, select_model):
     X_train, X_test, y_train, y_test = train_test_split( dataset[:,:input_window_size], dataset[:,input_window_size:],
                                                         test_size = 0.20, random_state = 42)
 
+    X_train = np.reshape(X_train,(len(X_train),input_window_size,1))
+    X_test = np.reshape(X_test, (len(X_test), input_window_size, 1))
+
     print('\n----  Training phase ----')
     print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 
@@ -200,7 +203,7 @@ def model_training(x, prediction_lenght, select_model):
     # Neural Network model ---------------------------------------------------------------------------------------------
     model = Sequential()
 
-    model.add(Reshape((input_window_size,num_features), input_shape=([input_window_size])))
+    #model.add(Reshape((input_window_size,num_features), input_shape=([input_window_size])))
 
     # Layer 1
     model.add(GRU(units            = RNN_neurons[0],
@@ -210,8 +213,8 @@ def model_training(x, prediction_lenght, select_model):
                   bias_initializer = bias_init,
                   dropout          = dropout[0],
                   return_sequences = True,  # set to true is following layer is recurrent
-                  #input_shape      = (None, input_window_size, num_features),
-                  #batch_input_shape= [None, input_window_size, num_features],
+                  input_shape      = (None, input_window_size, num_features),
+                  batch_input_shape= [None, input_window_size, num_features],
                   batch_size       = None,
                   stateful         = False))
 
@@ -234,15 +237,17 @@ def model_training(x, prediction_lenght, select_model):
                     use_bias   = True,
                     kernel_initializer = kernel_init,
                     bias_initializer   = bias_init))
-    #model.add(Reshape((output_window_size, num_channels)))
+
+    #model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
-    opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+    opt = Nadam(lr=0.02, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+    #opt = SGD(lr=0.01, momentum=0.0, decay=0.0, nesterov=False)
 
 
     model.compile(optimizer = opt,
                   loss      = 'mse',    # Loss function specification - MSE
-                  metrics   = ['acc'])  # additional metric of analysis - ACCURACY, not suited for regression
+                  metrics   = ['mape'])  # additional metric of analysis
     # purposes, but still usefull in debugging
 
 
@@ -253,8 +258,8 @@ def model_training(x, prediction_lenght, select_model):
                              embeddings_freq=0, embeddings_layer_names=None,
                              embeddings_metadata=None)
 
-    # Training ---------------------------------------------------------------------------------------------------------
 
+    # Training ---------------------------------------------------------------------------------------------------------
     # If stateless RNN are used, standard fit is employed.
     history = model.fit(x               =X_train,  # X data
                         y               =y_train,  # Y data
@@ -271,7 +276,7 @@ def model_training(x, prediction_lenght, select_model):
 
     # Performances evaluation ------------------------------------------------------------------------------------------
     score = model.evaluate(X_test, y_test, verbose=2, batch_size=batch_size)
-    print('Test loss loss: ' + "{0:.5f}".format(score[0]) + ' - acc: ' + "{0:.4f}".format(score[1]))
+    print('Test loss loss: ' + "{0:.5f}".format(score[0]))
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
@@ -312,18 +317,16 @@ if __name__ == '__main__':
     # Functions call ----------------------------
     t=time.time()
     dates, income = load_data(filename)
-    print(time.time()-t)
+    print('Performed in ' + "{0:.2f}".format(time.time()-t) + ' seconds.')
     t = time.time()
     dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech)
-    print(time.time() - t)
+    print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
+    #t = time.time()
+    #data_exploration(dates_new,income_new,nan_idx,nan_rm_tech, save_figure)
+    #print(time.time() - t)
     t = time.time()
-
-    data_exploration(dates_new,income_new,nan_idx,nan_rm_tech, save_figure)
-    print(time.time() - t)
-    t = time.time()
-
     model_training(income_new, prediction_lenght, select_model)
-    print(time.time() - t)
+    print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
 
     # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
