@@ -1,15 +1,14 @@
 # import libraries
 import numpy as np
 import pandas as pd
-from os import getcwd, sep, system
+from os import getcwd, sep, system, environ
 from sys import exit, exc_info, platform
-import random as rnd
-import matplotlib
 import datetime
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 from sklearn.externals import joblib
 import matplotlib.pyplot as plt
+import time
 
 
 # neural network
@@ -21,6 +20,7 @@ from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard
 from keras              import backend as K
 
+environ['TF_CPP_MIN_LOG_LEVEL'] = '2'   # disable any tensorflow warning
 
 # Directory path
 code_path   = getcwd()
@@ -35,7 +35,7 @@ def load_data(filename):
     Exceptuion during data loading are handled
 
     Outputs: two numpy array, extracted from the file'''
-
+    print('\n---- Data loading phase ----')
     try:
         print(data_path + sep + filename)
         df = pd.read_csv(filepath_or_buffer=data_path + sep + filename, sep=',')  # read data file
@@ -68,6 +68,7 @@ def pre_processing(dates, income, nan_rm_tech):
 
     Outputs: preprocessed features and list of nan indicies (for later use in data_exploration)'''
 
+    print('\n---- Data preprocessing phase ----')
     #### address missing value problem  -------------------------------------
 
     # conversion of first feature (dates) to datetimes and fill missing dates
@@ -168,10 +169,10 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 def model_training(x, prediction_lenght, select_model):
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
-    input_window_size  = 10  # number of samples per channel used to feed the NN
+    input_window_size  = 100  # number of samples per channel used to feed the NN
     output_window_size = 30
     batch_size         = 25
-    training_epochs    = 1
+    training_epochs    = 25
 
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
@@ -182,16 +183,13 @@ def model_training(x, prediction_lenght, select_model):
     X_train, X_test, y_train, y_test = train_test_split( dataset[:,:input_window_size], dataset[:,input_window_size:],
                                                         test_size = 0.20, random_state = 42)
 
-    #X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
-    #X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
-
-
+    print('\n----  Training phase ----')
     print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [30, 20]  # Defines the number of neurons of the recurrent layers
+    RNN_neurons = [250, 250]  # Defines the number of neurons of the recurrent layers
     full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
-    dropout     = [0,0,0.1]  # Definition of Dropout probabilities
+    dropout     = [0.1,0.1]  # Definition of Dropout probabilities
     activation  = ['relu', 'tanh']
 
     # Definition of initializers for the weigths and biases of the dense layers.
@@ -272,8 +270,8 @@ def model_training(x, prediction_lenght, select_model):
     model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
 
     # Performances evaluation ------------------------------------------------------------------------------------------
-    #score = model.evaluate(np.asarray(x_val1), np.asarray(y_val1), verbose=0, batch_size=batch_size)
-    #content = 'Validation loss: ' + "{0:.5f}".format(score[0]) + ' - acc: ' + "{0:.4f}".format(score[1])
+    score = model.evaluate(X_test, y_test, verbose=2, batch_size=batch_size)
+    print('Test loss loss: ' + "{0:.5f}".format(score[0]) + ' - acc: ' + "{0:.4f}".format(score[1]))
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
@@ -312,10 +310,20 @@ if __name__ == '__main__':
     select_model = 0     # 0 neural network, 1 other model
 
     # Functions call ----------------------------
+    t=time.time()
     dates, income = load_data(filename)
+    print(time.time()-t)
+    t = time.time()
     dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech)
+    print(time.time() - t)
+    t = time.time()
 
     data_exploration(dates_new,income_new,nan_idx,nan_rm_tech, save_figure)
+    print(time.time() - t)
+    t = time.time()
+
     model_training(income_new, prediction_lenght, select_model)
+    print(time.time() - t)
+    t = time.time()
 
     # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
