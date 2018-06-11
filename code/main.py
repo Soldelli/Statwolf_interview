@@ -169,10 +169,10 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 def model_training(x, prediction_lenght, select_model):
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
-    input_window_size  = 100  # number of samples per channel used to feed the NN
+    input_window_size  = 50  # number of samples per channel used to feed the NN
     output_window_size = 30
     batch_size         = 25
-    training_epochs    = 25
+    training_epochs    = 5
 
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
@@ -180,17 +180,21 @@ def model_training(x, prediction_lenght, select_model):
     dataset = np.asarray(series_to_supervised(x, n_in=input_window_size,
                                               n_out=output_window_size, dropnan=True).values.tolist())
     # The previously obtained dataset is divided into training and testing examples
-    X_train, X_test, y_train, y_test = train_test_split( dataset[:,:input_window_size], dataset[:,input_window_size:],
+    idx = int(len(dataset)*0.8)
+    X_test, y_test =  dataset[idx:,:input_window_size], dataset[idx:,input_window_size:]    # last 20% of dataset is reserved for testing
+    # the other 80% is divided again in 80% training 20% validation
+    X_train, X_val, y_train, y_val = train_test_split( dataset[:idx,:input_window_size], dataset[:idx,input_window_size:],
                                                         test_size = 0.20, random_state = 42)
 
     X_train = np.reshape(X_train,(len(X_train),input_window_size,1))
-    X_test = np.reshape(X_test, (len(X_test), input_window_size, 1))
+    X_val   = np.reshape(X_val,  (len(X_val),  input_window_size, 1))
+    X_test  = np.reshape(X_test, (len(X_test), input_window_size, 1))
 
     print('\n----  Training phase ----')
-    print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
+    print(X_train.shape, X_test.shape, X_val.shape, y_train.shape, y_test.shape, y_val.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [250, 250]  # Defines the number of neurons of the recurrent layers
+    RNN_neurons = [150, 150]  # Defines the number of neurons of the recurrent layers
     full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
     dropout     = [0.1,0.1]  # Definition of Dropout probabilities
     activation  = ['relu', 'tanh']
@@ -241,8 +245,8 @@ def model_training(x, prediction_lenght, select_model):
     #model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
-    opt = Nadam(lr=0.02, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
-    #opt = SGD(lr=0.01, momentum=0.0, decay=0.0, nesterov=False)
+    #opt = Nadam(lr=0.02, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+    opt = SGD(lr=0.01, momentum=0.0, decay=0.0, nesterov=False)
 
 
     model.compile(optimizer = opt,
@@ -266,17 +270,21 @@ def model_training(x, prediction_lenght, select_model):
                         epochs          =training_epochs,      # number of fit iteration across all training set
                         batch_size      =batch_size,           # number of training samples preprocessed in parallel.
                         verbose         =2,                    # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
-                        validation_split=0.2,                  # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                        #validation_split=0.2,                  # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                        validation_data = (X_val,y_val),
                         shuffle         =False,                # data is not shuffled from epoch to epoch.
                         callbacks       =[tbCallback])         # save graph and other data for visualization with tensorboard.
 
 
     # Model saving -----------------------------------------------------------------------------------------------------
-    model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
+    #model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
+    #joblib.dump(model, output_path +sep+ 'models'+sep+'RNN_model.pkl')
 
     # Performances evaluation ------------------------------------------------------------------------------------------
     score = model.evaluate(X_test, y_test, verbose=2, batch_size=batch_size)
     print('Test loss loss: ' + "{0:.5f}".format(score[0]))
+
+    prediction_visualization(X_test,y_test,model)
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
@@ -301,8 +309,23 @@ def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
         plt.show()
 
 
-def prediction_visualization():
-    print('To be done')
+def prediction_visualization(X,y,model):
+    for i in range(10):
+        y_hat = model.predict(np.reshape(X[i],(1,X[i].shape[0],X[i].shape[1])))   # fare in blocco, e gestire dopo il plot
+        plt.figure()
+        plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
+        plt.grid(True), plt.hold
+
+        x = np.linspace(0, len(y[i]) + 1, len(y[i]))
+        plt.plot(x, y[i], linewidth=0.5, marker='o', markersize=1)
+
+        plt.plot(x, y_hat[0], linewidth=0.5, color='red', marker='o', markersize=1)
+        plt.legend(['true serie', 'predicted serie'], loc='upper right')
+
+        plt.savefig(output_path + sep + 'images' + sep + 'data_prediction_' + str(i) + '.pdf',bbox_inches='tight')
+        plt.close()
+
+
 
 #Main
 if __name__ == '__main__':
