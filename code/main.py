@@ -1,7 +1,7 @@
 # import libraries
 import numpy as np
 import pandas as pd
-from os import getcwd, sep
+from os import getcwd, sep, system
 from sys import exit, exc_info, platform
 import random as rnd
 import matplotlib
@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 # neural network
 import keras
 from keras.models       import Model, Sequential
-from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten
+from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
 from keras.optimizers   import Nadam
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard
@@ -133,16 +133,15 @@ def pre_processing(dates, income, nan_rm_tech):
 
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
-	"""
-	Frame a time series as a supervised learning dataset.
+	"""Frame a time series as a supervised learning dataset.
 	Arguments:
 		data: Sequence of observations as a list or NumPy array.
 		n_in: Number of lag observations as input (X).
 		n_out: Number of observations as output (y).
 		dropnan: Boolean whether or not to drop rows with NaN values.
 	Returns:
-		Pandas DataFrame of series framed for supervised learning.
-	"""
+		Pandas DataFrame of series framed for supervised learning."""
+
 	n_vars = 1 if type(data) is list else data.shape[1]
 	df = pd.DataFrame(data)
 	cols, names = list(), list()
@@ -165,13 +164,14 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 		agg.dropna(inplace=True)
 	return agg
 
+
 def model_training(x, prediction_lenght, select_model):
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
     input_window_size  = 10  # number of samples per channel used to feed the NN
     output_window_size = 30
-    batch_size         = 100
-    training_epochs    = 40
+    batch_size         = 25
+    training_epochs    = 1
 
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
@@ -181,8 +181,12 @@ def model_training(x, prediction_lenght, select_model):
     # The previously obtained dataset is divided into training and testing examples
     X_train, X_test, y_train, y_test = train_test_split( dataset[:,:input_window_size], dataset[:,input_window_size:],
                                                         test_size = 0.20, random_state = 42)
-    print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 
+    #X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+    #X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+
+
+    print(X_train.shape, X_test.shape, y_train.shape, y_test.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
     RNN_neurons = [30, 20]  # Defines the number of neurons of the recurrent layers
@@ -198,6 +202,7 @@ def model_training(x, prediction_lenght, select_model):
     # Neural Network model ---------------------------------------------------------------------------------------------
     model = Sequential()
 
+    model.add(Reshape((input_window_size,num_features), input_shape=([input_window_size])))
 
     # Layer 1
     model.add(GRU(units            = RNN_neurons[0],
@@ -207,8 +212,8 @@ def model_training(x, prediction_lenght, select_model):
                   bias_initializer = bias_init,
                   dropout          = dropout[0],
                   return_sequences = True,  # set to true is following layer is recurrent
-                  input_shape      = (batch_size, input_window_size, num_features),
-                  batch_input_shape= [None, input_window_size, num_features],
+                  #input_shape      = (None, input_window_size, num_features),
+                  #batch_input_shape= [None, input_window_size, num_features],
                   batch_size       = None,
                   stateful         = False))
 
@@ -222,7 +227,7 @@ def model_training(x, prediction_lenght, select_model):
                   return_sequences = False,  # set to true is following layer is recurrent
                   stateful         = False))
 
-    model.add(Flatten())
+    #model.add(Flatten())
 
 
     # Layer 3
@@ -253,8 +258,8 @@ def model_training(x, prediction_lenght, select_model):
     # Training ---------------------------------------------------------------------------------------------------------
 
     # If stateless RNN are used, standard fit is employed.
-    history = model.fit(x               =np.reshape(X_train,(X_train.shape[0],X_train.shape[1],1)),  # X data
-                        y               =np.reshape(y_train,(y_train.shape[0],y_train.shape[1],1)),  # Y data
+    history = model.fit(x               =X_train,  # X data
+                        y               =y_train,  # Y data
                         epochs          =training_epochs,      # number of fit iteration across all training set
                         batch_size      =batch_size,           # number of training samples preprocessed in parallel.
                         verbose         =2,                    # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
@@ -271,8 +276,7 @@ def model_training(x, prediction_lenght, select_model):
     #content = 'Validation loss: ' + "{0:.5f}".format(score[0]) + ' - acc: ' + "{0:.4f}".format(score[1])
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
-    os.system('tensorboard --logdir=' + save_path + ' --host=127.0.0.1')
-
+    #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
 
 
 def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
@@ -299,7 +303,7 @@ def prediction_visualization():
 
 #Main
 if __name__ == '__main__':
-    # Parameters
+    # Parameters --------------------------------
     filename = 'ts_forecast.csv'
     save_figure = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
@@ -307,7 +311,7 @@ if __name__ == '__main__':
     prediction_lenght = 30
     select_model = 0     # 0 neural network, 1 other model
 
-    # Functions call
+    # Functions call ----------------------------
     dates, income = load_data(filename)
     dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech)
 
