@@ -1,7 +1,7 @@
 # import libraries
 import numpy as np
 import pandas as pd
-from os import getcwd, sep, system, environ
+from os import getcwd, sep, system, environ, path, makedirs
 from sys import exit, exc_info, platform
 import datetime
 from sklearn import preprocessing
@@ -9,6 +9,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.externals import joblib
 import matplotlib.pyplot as plt
 import time
+from scipy import signal
+from dateutil import relativedelta
 
 
 # neural network
@@ -52,7 +54,7 @@ def load_data(filename):
     return dates, income
 
 
-def pre_processing(dates, income, nan_rm_tech):
+def pre_processing(dates, income, nan_rm_tech,filter):
     ''' The function perform data preprocessing, addressing missing values and normalization problems.
 
     Missing date values are added manually to obtain one day spacing through the all dates.
@@ -121,16 +123,44 @@ def pre_processing(dates, income, nan_rm_tech):
     if nan_rm_tech == 3:
         print('To be done')
 
+    print('Missing data filled with technique ' +str(nan_rm_tech))
+
+    income_new = income
+    if filter :
+        print('Filtering procedure perdormed with low pass Butterworth filter')
+
+        # PSD estimation - do we have white noise?
+        nyq = 0.5 * 1                       # Filtering parameters
+        normalCutoff = 0.04 / nyq
+        b, a = signal.butter(4, normalCutoff, btype='low', analog=False)
+        income_new = signal.filtfilt(b, a, income)
+
+        x1, p1 = signal.welch(x=income, window="hanning", axis=0, detrend=False,
+                              nperseg=len(income_new) / 4)      # utilization of welch method for Power Spectral
+                                                                # Density estimation
+        x2, p2 = signal.welch(x=income_new, window="hanning", axis=0, detrend=False,
+                                nperseg=len(income_new) / 4)
+
+        p1,p2 = 20 * np.log10(p1), 20 * np.log10(p2)
+        plt.semilogx(x1, p1, linewidth=1)
+        plt.semilogx(x2, p2, linewidth=1, color='red')
+        plt.ylabel('Power Spectral Density [dB]')
+        plt.xlabel('Frequency [Hz]')
+        plt.grid(True, which='both')
+        plt.ylim([np.min(p1)-10, np.max(p1)+10])
+        plt.savefig(output_path + sep + 'images' + sep + 'PSD_time_series.pdf', dpi=150, transparent=False)
+        plt.close()
+
     ### data normalization, scale data between 0 and 1 ----------------------
-    income = income.reshape(-1,1)
+    income_new = income_new.reshape(-1,1)
     min_max_scaler = preprocessing.MinMaxScaler()
-    income = min_max_scaler.fit_transform(income)
+    income_new = min_max_scaler.fit_transform(income_new)
 
     # scaler saved to file --------------------------------------------------
 
     joblib.dump(min_max_scaler, output_path +sep+'models'+sep+'scaler.pkl')
 
-    return dates, income, nan_idx
+    return dates, income_new, nan_idx
 
 
 def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
@@ -177,7 +207,7 @@ def model_training(x, prediction_lenght, select_model):
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
     # time series
-    print('Mean value of data sequence:', np.mean(x))
+
     dataset = np.asarray(series_to_supervised(x, n_in=input_window_size,
                                               n_out=output_window_size, dropnan=True).values.tolist())
     # The previously obtained dataset is divided into training and testing examples
@@ -192,6 +222,7 @@ def model_training(x, prediction_lenght, select_model):
     X_test  = np.reshape(X_test, (len(X_test), input_window_size, 1))
 
     print('\n----  Training phase ----')
+    print('Mean value of data sequence:', np.mean(x))
     print(X_train.shape, X_test.shape, X_val.shape, y_train.shape, y_test.shape, y_val.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
@@ -292,24 +323,74 @@ def model_training(x, prediction_lenght, select_model):
 
 def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
     '''Plot of income variable, missing values (which have been previously added) are enlightened '''
-    plt.figure()
+    print('\n----  Data exploration and visualization ----')
+    month_idx = []
+    year_idx = [0]
+    # montly plot
+    if not path.exists(output_path + sep + 'images' + sep + 'montly'):  # create directory is not present
+        makedirs(output_path + sep + 'images' + sep+ 'montly')
+    date = []
+    date2 = []
+
+    # formula below computes the number of month between first and last data as: delta_years*12 + delta_monts
+    for i in range(dates_new[-1].month-dates_new[0].month+(dates_new[-1].year-dates_new[0].year)*12):
+        if i == 0:
+            date  = dates_new[0]
+            date2 = dates_new[0].replace(month=date.month + 1)
+        else:
+            try:
+                date = date.replace(month=date.month + 1)
+            except ValueError:
+                if date.month == 12:
+                    date = date.replace(year=date.year + 1, month=1)
+                    year_idx.append(np.argwhere(dates_new == date)[0][0])
+            try:
+                date2= date.replace(month=date.month + 1)
+            except ValueError:
+                if date2.month == 12:
+                    date2 = date2.replace(year=date2.year + 1, month=1)
+
+        idx1 = np.argwhere(dates_new == date)[0][0]
+        month_idx.append(idx1)
+        idx2 = np.argwhere(dates_new == date2)[0][0]
+
+        plt.figure(),
+        plt.xlabel('Days ('+str(date.year)+'/'+str(date.month)+')' ), plt.ylabel('Income'), plt.title('Trend visualization')
+        plt.grid(True), plt.hold
+
+        x = np.linspace(0, len(dates_new[idx1:idx2]) + 1, len(dates_new[idx1:idx2]))
+        plt.plot(x, income_new[idx1:idx2], linewidth=0.5, marker='o', markersize=1)
+
+        plt.savefig(output_path + sep + 'images' + sep + 'montly'+ sep +'data_exploration_montly_view' + str(i) + '.pdf',
+                        bbox_inches='tight',dpi=600)
+        plt.close()
+
+    #whole sequence
+    plt.figure(figsize=(15,6))
     plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
     plt.grid(True), plt.hold
-
-
-    x = np.linspace(0,len(dates_new)+1, len(dates_new))
-    plt.plot(x,income_new,linewidth=0.5, marker='o', markersize=1)
-
-    plt.plot(x[nan_idx], income_new[nan_idx],  color='red', marker='o', markersize=2, linestyle='')
+    plt.xticks(year_idx, dates_new[year_idx],  fontsize=8)
+    plt.yticks(fontsize=8)
+    x = np.linspace(0, len(dates_new) + 1, len(dates_new))
+    plt.plot(x, income_new, linewidth=0.5, marker='o', markersize=0.6)
+    plt.plot(x[nan_idx], income_new[nan_idx], color='red', marker='o', markersize=2, linestyle='')
+    for idx in month_idx:
+        plt.axvline(idx, color='green', linestyle=':', linewidth=0.25)
+    plt.axvline(len(x), color='green', linestyle=':', linewidth=0.25)
+    for idx in year_idx:
+        plt.axvline(idx, color='purple', linestyle='--', linewidth=1.5)
     plt.legend(['true values', 'fake values'], loc='upper right')
     if save_figure:
-        plt.savefig(output_path +sep+'images'+sep+'data_exploration_' + str(nan_rm_tech) + '.pdf', bbox_inches='tight')
+        plt.savefig(output_path + sep + 'images' + sep + 'data_exploration_' + str(nan_rm_tech) + '.pdf',
+                    bbox_inches='tight', dpi=600)
         plt.close()
     else:
         plt.show()
 
 
 def prediction_visualization(X,y,model):
+    if not path.exists(output_path + sep + 'images' + sep + 'predictions'):  # create directory is not present
+        makedirs(output_path + sep + 'images' + sep+ 'predictions')
     for i in range(10):
         y_hat = model.predict(np.reshape(X[i],(1,X[i].shape[0],X[i].shape[1])))   # fare in blocco, e gestire dopo il plot
         plt.figure()
@@ -322,7 +403,8 @@ def prediction_visualization(X,y,model):
         plt.plot(x, y_hat[0], linewidth=0.5, color='red', marker='o', markersize=1)
         plt.legend(['true serie', 'predicted serie'], loc='upper right')
 
-        plt.savefig(output_path + sep + 'images' + sep + 'data_prediction_' + str(i) + '.pdf',bbox_inches='tight')
+        plt.savefig(output_path + sep + 'images' + sep +'predictions'+ sep + 'data_prediction_' + str(i)
+                    + '.pdf',bbox_inches='tight')
         plt.close()
 
 
@@ -332,6 +414,7 @@ if __name__ == '__main__':
     # Parameters --------------------------------
     filename = 'ts_forecast.csv'
     save_figure = True
+    filter = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
     prediction_lenght = 30
@@ -342,12 +425,13 @@ if __name__ == '__main__':
     dates, income = load_data(filename)
     print('Performed in ' + "{0:.2f}".format(time.time()-t) + ' seconds.')
     t = time.time()
-    dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech)
+    dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech,filter)
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
-    #t = time.time()
-    #data_exploration(dates_new,income_new,nan_idx,nan_rm_tech, save_figure)
-    #print(time.time() - t)
     t = time.time()
+    data_exploration(dates_new, income_new, nan_idx, nan_rm_tech, save_figure)
+    print(time.time() - t)
+    t = time.time()
+    exit(0)
     model_training(income_new, prediction_lenght, select_model)
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
