@@ -169,14 +169,15 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 def model_training(x, prediction_lenght, select_model):
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
-    input_window_size  = 50  # number of samples per channel used to feed the NN
-    output_window_size = 30
+    input_window_size  = 10  # number of samples per channel used to feed the NN
+    output_window_size = 10
     batch_size         = 25
-    training_epochs    = 5
+    training_epochs    = 10
 
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
     # time series
+    print('Mean value of data sequence:', np.mean(x))
     dataset = np.asarray(series_to_supervised(x, n_in=input_window_size,
                                               n_out=output_window_size, dropnan=True).values.tolist())
     # The previously obtained dataset is divided into training and testing examples
@@ -184,7 +185,7 @@ def model_training(x, prediction_lenght, select_model):
     X_test, y_test =  dataset[idx:,:input_window_size], dataset[idx:,input_window_size:]    # last 20% of dataset is reserved for testing
     # the other 80% is divided again in 80% training 20% validation
     X_train, X_val, y_train, y_val = train_test_split( dataset[:idx,:input_window_size], dataset[:idx,input_window_size:],
-                                                        test_size = 0.20, random_state = 42)
+                                                        test_size = 0.20)
 
     X_train = np.reshape(X_train,(len(X_train),input_window_size,1))
     X_val   = np.reshape(X_val,  (len(X_val),  input_window_size, 1))
@@ -194,9 +195,9 @@ def model_training(x, prediction_lenght, select_model):
     print(X_train.shape, X_test.shape, X_val.shape, y_train.shape, y_test.shape, y_val.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [150, 150]  # Defines the number of neurons of the recurrent layers
+    RNN_neurons = [50, 50]  # Defines the number of neurons of the recurrent layers
     full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
-    dropout     = [0.1,0.1]  # Definition of Dropout probabilities
+    dropout     = [0.05,0.05]  # Definition of Dropout probabilities
     activation  = ['relu', 'tanh']
 
     # Definition of initializers for the weigths and biases of the dense layers.
@@ -278,7 +279,6 @@ def model_training(x, prediction_lenght, select_model):
 
     # Model saving -----------------------------------------------------------------------------------------------------
     #model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
-    #joblib.dump(model, output_path +sep+ 'models'+sep+'RNN_model.pkl')
 
     # Performances evaluation ------------------------------------------------------------------------------------------
     score = model.evaluate(X_test, y_test, verbose=2, batch_size=batch_size)
