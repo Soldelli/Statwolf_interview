@@ -17,7 +17,7 @@ from dateutil import relativedelta
 import keras
 from keras.models       import Model, Sequential
 from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
-from keras.optimizers   import Nadam, SGD
+from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard
 from keras              import backend as K
@@ -196,13 +196,28 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 	return agg
 
 
+def MAPE(Y, Yhat):
+    diff = K.abs((Y - Yhat) / K.clip(K.abs(Y),
+                                            K.epsilon(),
+                                            None))
+    return 100. * K.mean(diff, axis=-1)
+
+# Auxiliary methods
+def SMAPE(Y, Yhat):
+    # symmetric mean absolute percentage error, they call it symmetric (but it is not)
+    # https://robjhyndman.com/hyndsight/smape/
+    divide = K.abs(Y - Yhat) / K.abs(Y + Yhat)
+    smape = 100. *  (K.mean(2. * divide))
+    return smape
+
+
 def model_training(x, prediction_lenght, select_model):
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
-    input_window_size  = 10  # number of samples per channel used to feed the NN
-    output_window_size = 10
+    input_window_size  = 30  # number of samples per channel used to feed the NN
+    output_window_size = 7
     batch_size         = 25
-    training_epochs    = 10
+    training_epochs    = 50
 
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
@@ -226,7 +241,7 @@ def model_training(x, prediction_lenght, select_model):
     print(X_train.shape, X_test.shape, X_val.shape, y_train.shape, y_test.shape, y_val.shape)
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [50, 50]  # Defines the number of neurons of the recurrent layers
+    RNN_neurons = [200, 200]  # Defines the number of neurons of the recurrent layers
     full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
     dropout     = [0.05,0.05]  # Definition of Dropout probabilities
     activation  = ['relu', 'tanh']
@@ -234,7 +249,6 @@ def model_training(x, prediction_lenght, select_model):
     # Definition of initializers for the weigths and biases of the dense layers.
     kernel_init = VarianceScaling(scale=1.0, mode='fan_avg', distribution='normal', seed=None)
     bias_init = Constant(value=0.1)
-
 
     # Neural Network model ---------------------------------------------------------------------------------------------
     model = Sequential()
@@ -277,13 +291,24 @@ def model_training(x, prediction_lenght, select_model):
     #model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
-    #opt = Nadam(lr=0.02, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
-    opt = SGD(lr=0.01, momentum=0.0, decay=0.0, nesterov=False)
 
+    # learning_rate = 0.01
+    # decay_rate = learning_rate / training_epochs
+    # momentum = 0.8
+    # opt = SGD(lr=learning_rate, decay=decay_rate, momentum=momentum, nesterov=False)
+    #opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+
+    # Losses
+    loss = ['mean_squared_error', 'mean_absolute_error', 'mean_absolute_percentage_error',
+            'mean_squared_logarithmic_error']
+
+    # Metrics
+    metrics = ['mse', 'mape', SMAPE, MAPE]  # and loss
 
     model.compile(optimizer = opt,
-                  loss      = 'mse',    # Loss function specification - MSE
-                  metrics   = ['mape'])  # additional metric of analysis
+                  loss      = 'mae',    # Loss function specification - MSE
+                  metrics   = metrics)  # additional metric of analysis
     # purposes, but still usefull in debugging
 
 
@@ -431,7 +456,6 @@ if __name__ == '__main__':
     data_exploration(dates_new, income_new, nan_idx, nan_rm_tech, save_figure)
     print(time.time() - t)
     t = time.time()
-    exit(0)
     model_training(income_new, prediction_lenght, select_model)
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
