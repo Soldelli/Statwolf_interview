@@ -15,12 +15,14 @@ from dateutil import relativedelta
 
 # neural network
 import keras
-from keras.models       import Model, Sequential
+from keras.models       import Model, Sequential, load_model
 from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
 from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
-from keras.callbacks    import TensorBoard
+from keras.callbacks    import TensorBoard, Callback
 from keras              import backend as K
+import keras.objectives
+
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '2'   # disable any tensorflow warning
 
@@ -52,6 +54,77 @@ def load_data(filename):
     print('Data successfully loaded')
 
     return dates, income
+
+
+def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, montly_view,save_figure):
+    '''Plot of income variable, missing values (which have been previously added) are enlightened '''
+    print('\n----  Data exploration and visualization ----')
+    if montly_view:
+        print('Plot of single months sequence')
+    month_idx = []
+    year_idx = [0]
+    # montly plot
+    if not path.exists(output_path + sep + 'images' + sep + 'montly'):  # create directory is not present
+        makedirs(output_path + sep + 'images' + sep+ 'montly')
+    date = []
+    date2 = []
+
+    # formula below computes the number of month between first and last data as: delta_years*12 + delta_monts
+    for i in range(dates_new[-1].month-dates_new[0].month+(dates_new[-1].year-dates_new[0].year)*12):
+        if i == 0:
+            date  = dates_new[0]
+            date2 = dates_new[0].replace(month=date.month + 1)
+        else:
+            try:
+                date = date.replace(month=date.month + 1)
+            except ValueError:
+                if date.month == 12:
+                    date = date.replace(year=date.year + 1, month=1)
+                    year_idx.append(np.argwhere(dates_new == date)[0][0])
+            try:
+                date2= date.replace(month=date.month + 1)
+            except ValueError:
+                if date2.month == 12:
+                    date2 = date2.replace(year=date2.year + 1, month=1)
+
+        idx1 = np.argwhere(dates_new == date)[0][0]
+        month_idx.append(idx1)
+        idx2 = np.argwhere(dates_new == date2)[0][0]
+
+        if montly_view:
+            plt.figure(),
+            plt.xlabel('Days ('+str(date.year)+'/'+str(date.month)+')' ), plt.ylabel('Income'), plt.title('Trend visualization')
+            plt.grid(True), plt.hold
+
+            x = np.linspace(0, len(dates_new[idx1:idx2]) + 1, len(dates_new[idx1:idx2]))
+            plt.plot(x, income_new[idx1:idx2], linewidth=0.5, marker='o', markersize=1)
+
+            plt.savefig(output_path + sep + 'images' + sep + 'montly'+ sep +'data_exploration_montly_view' + str(i) + '.pdf',
+                            bbox_inches='tight',dpi=600)
+            plt.close()
+
+    #whole sequence
+    print('Plot of whole sequence')
+    plt.figure(figsize=(15,6))
+    plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
+    plt.grid(True), plt.hold
+    plt.xticks(year_idx, dates_new[year_idx],  fontsize=8)
+    plt.yticks(fontsize=8)
+    x = np.linspace(0, len(dates_new) + 1, len(dates_new))
+    plt.plot(x, income_new, linewidth=0.5, marker='o', markersize=0.6)
+    plt.plot(x[nan_idx], income_new[nan_idx], color='red', marker='o', markersize=2, linestyle='')
+    for idx in month_idx:
+        plt.axvline(idx, color='green', linestyle=':', linewidth=0.25)
+    plt.axvline(len(x), color='green', linestyle=':', linewidth=0.25)
+    for idx in year_idx:
+        plt.axvline(idx, color='purple', linestyle='--', linewidth=1.5)
+    plt.legend(['true values', 'fake values'], loc='upper right')
+    if save_figure:
+        plt.savefig(output_path + sep + 'images' + sep + 'data_exploration_' + str(nan_rm_tech) + '.pdf',
+                    bbox_inches='tight', dpi=600)
+        plt.close()
+    else:
+        plt.show()
 
 
 def pre_processing(dates, income, nan_rm_tech,filter):
@@ -196,13 +269,39 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 	return agg
 
 
+def dataset_split(x, w_size, split):
+    '''The function splits the dataset into training, validation and test'''
+    print('\n----  Performing data split  ----')
+    # Training set construction ----------------------------------------------------------------------------------------
+    # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
+    # time series
+
+    dataset = np.asarray(series_to_supervised(x, n_in=w_size[0], n_out=w_size[1], dropnan=True).values.tolist())
+    # The previously obtained dataset is divided into training and testing examples
+    idx = int(len(dataset) * split[0])
+    X_test, y_test = dataset[idx:, :w_size[0]], dataset[idx:,w_size[0]:]  # last 20% of dataset is reserved for testing
+    # the other 80% is divided again in 80% training 20% validation
+    X_train, X_val, y_train, y_val = train_test_split(dataset[:idx, :w_size[0]],
+                                                      dataset[:idx, w_size[0]:],test_size=split[1])
+
+    X_train = np.reshape(X_train, (len(X_train), w_size[0], 1))
+    X_val   = np.reshape(X_val,   (len(X_val),   w_size[0], 1))
+    X_test  = np.reshape(X_test,  (len(X_test),  w_size[0], 1))
+
+    print('Training data shape   X=', X_train.shape,' y=', y_train.shape,)
+    print('Validation data shape X=', X_val.shape,  ' y=', y_val.shape)
+    print('Test data shape       X=', X_test.shape, ' y=', y_test.shape)
+
+    return X_train, X_test, X_val, y_train, y_test, y_val
+
+
 def MAPE(Y, Yhat):
     diff = K.abs((Y - Yhat) / K.clip(K.abs(Y),
                                             K.epsilon(),
                                             None))
     return 100. * K.mean(diff, axis=-1)
 
-# Auxiliary methods
+
 def SMAPE(Y, Yhat):
     # symmetric mean absolute percentage error, they call it symmetric (but it is not)
     # https://robjhyndman.com/hyndsight/smape/
@@ -211,40 +310,29 @@ def SMAPE(Y, Yhat):
     return smape
 
 
-def model_training(x, prediction_lenght, select_model):
+def model_training(X_train, X_val, y_train, y_val, w_size):
+    '''
+    The function trains a recursive neural network with 2 GRU layes and a fully connected one, to predict a future
+    windows of the signal.
+    :param X_train:
+    :param X_val:
+    :param y_train:
+    :param y_val:
+    :param w_size:
+    '''
+    print('\n----  Training phase ----')
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
-    input_window_size  = 30  # number of samples per channel used to feed the NN
-    output_window_size = 7
+    input_window_size  = w_size[0]  # number of samples per channel used to feed the NN
+    output_window_size = w_size[1]
     batch_size         = 25
-    training_epochs    = 50
-
-    # Training set construction ----------------------------------------------------------------------------------------
-    # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
-    # time series
-
-    dataset = np.asarray(series_to_supervised(x, n_in=input_window_size,
-                                              n_out=output_window_size, dropnan=True).values.tolist())
-    # The previously obtained dataset is divided into training and testing examples
-    idx = int(len(dataset)*0.8)
-    X_test, y_test =  dataset[idx:,:input_window_size], dataset[idx:,input_window_size:]    # last 20% of dataset is reserved for testing
-    # the other 80% is divided again in 80% training 20% validation
-    X_train, X_val, y_train, y_val = train_test_split( dataset[:idx,:input_window_size], dataset[:idx,input_window_size:],
-                                                        test_size = 0.20)
-
-    X_train = np.reshape(X_train,(len(X_train),input_window_size,1))
-    X_val   = np.reshape(X_val,  (len(X_val),  input_window_size, 1))
-    X_test  = np.reshape(X_test, (len(X_test), input_window_size, 1))
-
-    print('\n----  Training phase ----')
-    print('Mean value of data sequence:', np.mean(x))
-    print(X_train.shape, X_test.shape, X_val.shape, y_train.shape, y_test.shape, y_val.shape)
+    training_epochs    = 100
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [200, 200]  # Defines the number of neurons of the recurrent layers
+    RNN_neurons = [20, 20]  # Defines the number of neurons of the recurrent layers
     full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
-    dropout     = [0.05,0.05]  # Definition of Dropout probabilities
-    activation  = ['relu', 'tanh']
+    dropout     = [0.0,0.0]  # Definition of Dropout probabilities
+    activation  = ['relu','tanh', 'sigmoid']
 
     # Definition of initializers for the weigths and biases of the dense layers.
     kernel_init = VarianceScaling(scale=1.0, mode='fan_avg', distribution='normal', seed=None)
@@ -283,7 +371,7 @@ def model_training(x, prediction_lenght, select_model):
 
     # Layer 3
     model.add(Dense(units      = full_conn[1],
-                    activation = 'linear',
+                    activation = activation[2],
                     use_bias   = True,
                     kernel_initializer = kernel_init,
                     bias_initializer   = bias_init))
@@ -292,22 +380,19 @@ def model_training(x, prediction_lenght, select_model):
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
 
-    # learning_rate = 0.01
-    # decay_rate = learning_rate / training_epochs
-    # momentum = 0.8
-    # opt = SGD(lr=learning_rate, decay=decay_rate, momentum=momentum, nesterov=False)
     #opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
     opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
 
     # Losses
-    loss = ['mean_squared_error', 'mean_absolute_error', 'mean_absolute_percentage_error',
+    loss = ['mean_squared_error', 'mean_absolute_error',
             'mean_squared_logarithmic_error']
 
     # Metrics
-    metrics = ['mse', 'mape', SMAPE, MAPE]  # and loss
+    metrics = ['mse', SMAPE]  # and loss
+    keras.objectives.custom_loss = SMAPE
 
     model.compile(optimizer = opt,
-                  loss      = 'mae',    # Loss function specification - MSE
+                  loss      = 'mae',    # mean absolute error
                   metrics   = metrics)  # additional metric of analysis
     # purposes, but still usefull in debugging
 
@@ -324,100 +409,67 @@ def model_training(x, prediction_lenght, select_model):
     # If stateless RNN are used, standard fit is employed.
     history = model.fit(x               =X_train,  # X data
                         y               =y_train,  # Y data
-                        epochs          =training_epochs,      # number of fit iteration across all training set
-                        batch_size      =batch_size,           # number of training samples preprocessed in parallel.
-                        verbose         =2,                    # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
-                        #validation_split=0.2,                  # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                        epochs          =training_epochs,        # number of fit iteration across all training set
+                        batch_size      =batch_size,             # number of training samples preprocessed in parallel.
+                        verbose         =2,                      # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
+                        #validation_split=0.2,                   # float (0. < x < 1). Fraction of the data to use as held-out validation data.
                         validation_data = (X_val,y_val),
-                        shuffle         =False,                # data is not shuffled from epoch to epoch.
-                        callbacks       =[tbCallback])         # save graph and other data for visualization with tensorboard.
+                        shuffle         =False,                  # data is not shuffled from epoch to epoch.
+                        callbacks       =[tbCallback]) # save graph and other data for visualization with tensorboard.
 
+    score = model.evaluate(X_train, y_train, verbose=1, batch_size=batch_size)
+    print('\nTraining loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
+
+    score = model.evaluate(X_val, y_val, verbose=1, batch_size=batch_size)
+    print('\nValidation loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
 
     # Model saving -----------------------------------------------------------------------------------------------------
-    #model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
+    model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
 
-    # Performances evaluation ------------------------------------------------------------------------------------------
-    score = model.evaluate(X_test, y_test, verbose=2, batch_size=batch_size)
-    print('Test loss loss: ' + "{0:.5f}".format(score[0]))
-
-    prediction_visualization(X_test,y_test,model)
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
+    print('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
 
 
-def data_exploration(dates_new, income_new, nan_idx,nan_rm_tech, save_figure):
-    '''Plot of income variable, missing values (which have been previously added) are enlightened '''
-    print('\n----  Data exploration and visualization ----')
-    month_idx = []
-    year_idx = [0]
-    # montly plot
-    if not path.exists(output_path + sep + 'images' + sep + 'montly'):  # create directory is not present
-        makedirs(output_path + sep + 'images' + sep+ 'montly')
-    date = []
-    date2 = []
 
-    # formula below computes the number of month between first and last data as: delta_years*12 + delta_monts
-    for i in range(dates_new[-1].month-dates_new[0].month+(dates_new[-1].year-dates_new[0].year)*12):
-        if i == 0:
-            date  = dates_new[0]
-            date2 = dates_new[0].replace(month=date.month + 1)
-        else:
-            try:
-                date = date.replace(month=date.month + 1)
-            except ValueError:
-                if date.month == 12:
-                    date = date.replace(year=date.year + 1, month=1)
-                    year_idx.append(np.argwhere(dates_new == date)[0][0])
-            try:
-                date2= date.replace(month=date.month + 1)
-            except ValueError:
-                if date2.month == 12:
-                    date2 = date2.replace(year=date2.year + 1, month=1)
+def model_test(X,y):
+    '''
+    The function perform the test score assessment, and plots the true signal vs the predicted one.
+    :param X:
+    :param y:
+    :return:
+    '''
+    print('\n----  Test phase  ----')
+    # Performances evaluation ------------------------------------------------------------------------------------------
+    model = load_model(output_path + sep + 'models' + sep + 'RNN_model.pkl', custom_objects={'SMAPE': SMAPE})
+    score = model.evaluate(X, y, verbose=2, batch_size=25)
+    print('Test loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
 
-        idx1 = np.argwhere(dates_new == date)[0][0]
-        month_idx.append(idx1)
-        idx2 = np.argwhere(dates_new == date2)[0][0]
-
-        plt.figure(),
-        plt.xlabel('Days ('+str(date.year)+'/'+str(date.month)+')' ), plt.ylabel('Income'), plt.title('Trend visualization')
-        plt.grid(True), plt.hold
-
-        x = np.linspace(0, len(dates_new[idx1:idx2]) + 1, len(dates_new[idx1:idx2]))
-        plt.plot(x, income_new[idx1:idx2], linewidth=0.5, marker='o', markersize=1)
-
-        plt.savefig(output_path + sep + 'images' + sep + 'montly'+ sep +'data_exploration_montly_view' + str(i) + '.pdf',
-                        bbox_inches='tight',dpi=600)
-        plt.close()
-
-    #whole sequence
-    plt.figure(figsize=(15,6))
-    plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
-    plt.grid(True), plt.hold
-    plt.xticks(year_idx, dates_new[year_idx],  fontsize=8)
-    plt.yticks(fontsize=8)
-    x = np.linspace(0, len(dates_new) + 1, len(dates_new))
-    plt.plot(x, income_new, linewidth=0.5, marker='o', markersize=0.6)
-    plt.plot(x[nan_idx], income_new[nan_idx], color='red', marker='o', markersize=2, linestyle='')
-    for idx in month_idx:
-        plt.axvline(idx, color='green', linestyle=':', linewidth=0.25)
-    plt.axvline(len(x), color='green', linestyle=':', linewidth=0.25)
-    for idx in year_idx:
-        plt.axvline(idx, color='purple', linestyle='--', linewidth=1.5)
-    plt.legend(['true values', 'fake values'], loc='upper right')
-    if save_figure:
-        plt.savefig(output_path + sep + 'images' + sep + 'data_exploration_' + str(nan_rm_tech) + '.pdf',
-                    bbox_inches='tight', dpi=600)
-        plt.close()
-    else:
-        plt.show()
-
-
-def prediction_visualization(X,y,model):
+    # Predictions visualization ----------------------------------------------------------------------------------------
     if not path.exists(output_path + sep + 'images' + sep + 'predictions'):  # create directory is not present
         makedirs(output_path + sep + 'images' + sep+ 'predictions')
-    for i in range(10):
-        y_hat = model.predict(np.reshape(X[i],(1,X[i].shape[0],X[i].shape[1])))   # fare in blocco, e gestire dopo il plot
+
+    y_new = np.reshape(y[0::y.shape[1]],-1)
+    y_hat = np.reshape(model.predict(X[0::y.shape[1]]),-1)
+
+    plt.figure()
+    plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Prediction comparison')
+    plt.grid(True), plt.hold
+
+    x = np.linspace(0, len(y_new) + 1, len(y_new))
+    plt.plot(x, y_new, linewidth=0.5, marker='o', markersize=1)
+
+    plt.plot(x, y_hat, linewidth=0.5, color='red', marker='o', markersize=1)
+    plt.legend(['true serie', 'predicted serie'], loc='upper right')
+    plt.ylim([0, 1])
+    plt.savefig(output_path + sep + 'images' + sep + 'data_prediction_.pdf', bbox_inches='tight', dpi=600)
+    plt.close()
+
+
+    exit(0)
+    for i in range(0, y_hat.shape[0], y_hat.shape[1]):
+        #y_hat = model.predict(np.reshape(X[i],(1,X[i].shape[0],X[i].shape[1])))   # fare in blocco, e gestire dopo il plot
         plt.figure()
         plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
         plt.grid(True), plt.hold
@@ -425,9 +477,9 @@ def prediction_visualization(X,y,model):
         x = np.linspace(0, len(y[i]) + 1, len(y[i]))
         plt.plot(x, y[i], linewidth=0.5, marker='o', markersize=1)
 
-        plt.plot(x, y_hat[0], linewidth=0.5, color='red', marker='o', markersize=1)
+        plt.plot(x, y_hat[i], linewidth=0.5, color='red', marker='o', markersize=1)
         plt.legend(['true serie', 'predicted serie'], loc='upper right')
-
+        plt.ylim([0, 1])
         plt.savefig(output_path + sep + 'images' + sep +'predictions'+ sep + 'data_prediction_' + str(i)
                     + '.pdf',bbox_inches='tight')
         plt.close()
@@ -439,25 +491,44 @@ if __name__ == '__main__':
     # Parameters --------------------------------
     filename = 'ts_forecast.csv'
     save_figure = True
+    montly_view = False
     filter = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
-    prediction_lenght = 30
-    select_model = 0     # 0 neural network, 1 other model
+    w_size=[30,10]
+    split = [0.8,0.2]   # used to split data, first the dataset is divided in training + validation 80% and test 20%
+                        # then validation is chosen as 20% of the first part
 
     # Functions call ----------------------------
     t=time.time()
     dates, income = load_data(filename)
+
     print('Performed in ' + "{0:.2f}".format(time.time()-t) + ' seconds.')
     t = time.time()
+
     dates_new, income_new, nan_idx = pre_processing(dates,income,nan_rm_tech,filter)
+
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
-    data_exploration(dates_new, income_new, nan_idx, nan_rm_tech, save_figure)
+
+    data_exploration(dates_new, income_new, nan_idx, nan_rm_tech,montly_view, save_figure)
+
+    print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
+    t = time.time()
+
+    X_train, X_test, X_val, y_train, y_test, y_val = dataset_split(income_new,w_size,split)
+
+    print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
+    t = time.time()
+
+   # model_training(X_train, X_val, y_train, y_val, w_size)
+
+    print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
+    t = time.time()
+
+    model_test(X_test,y_test)
+
     print(time.time() - t)
-    t = time.time()
-    model_training(income_new, prediction_lenght, select_model)
-    print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
-    t = time.time()
+    print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
 
     # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
