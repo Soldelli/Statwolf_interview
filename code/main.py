@@ -1,27 +1,27 @@
 # import libraries
-import numpy as np
+import numpy  as np
 import pandas as pd
-from os import getcwd, sep, system, environ, path, makedirs
-from sys import exit, exc_info, platform
 import datetime
-from sklearn import preprocessing
-from sklearn.model_selection import train_test_split
-from sklearn.externals import joblib
 import matplotlib.pyplot as plt
 import time
-from scipy import signal
-from dateutil import relativedelta
-
+from os         import getcwd, sep, system, environ, path, makedirs
+from sys        import exit, exc_info, platform
+from sklearn    import preprocessing
+from sklearn.model_selection import train_test_split
+from sklearn.externals       import joblib
+from scipy      import signal
+from dateutil   import relativedelta
 
 # neural network
 import keras
+import keras.objectives
 from keras.models       import Model, Sequential, load_model
 from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
 from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard, Callback
 from keras              import backend as K
-import keras.objectives
+
 
 
 environ['TF_CPP_MIN_LOG_LEVEL'] = '2'   # disable any tensorflow warning
@@ -236,7 +236,7 @@ def pre_processing(dates, income, nan_rm_tech,filter):
     return dates, income_new, nan_idx
 
 
-def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
+def series_to_supervised(data, n_in, n_out, dropnan=True):
 	"""Frame a time series as a supervised learning dataset.
 	Arguments:
 		data: Sequence of observations as a list or NumPy array.
@@ -269,30 +269,40 @@ def series_to_supervised(data, n_in=1, n_out=1, dropnan=True):
 	return agg
 
 
-def dataset_split(x, w_size, split):
+def dataset_split(x, w_size, split, ensemble, num_model):
     '''The function splits the dataset into training, validation and test'''
-    print('\n----  Performing data split  ----')
     # Training set construction ----------------------------------------------------------------------------------------
     # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
     # time series
+    datase = []
+    if num_model == 1:
+        print('\n----  Performing data split  ----')
+        dataset = np.asarray(series_to_supervised(x, n_in=w_size[0], n_out=w_size[1], dropnan=True).values.tolist())
+    if num_model == 2:
+        print()
+        dataset = np.asarray(series_to_supervised(x, n_in=w_size[0]+365, n_out=w_size[1], dropnan=True).values.tolist())
+    elif num_model ==3:
+        print()
+        dataset = np.asarray(series_to_supervised(x, n_in=365, n_out=w_size[1], dropnan=True).values.tolist())
 
-    dataset = np.asarray(series_to_supervised(x, n_in=w_size[0], n_out=w_size[1], dropnan=True).values.tolist())
+    print('Model number', num_model, 'win_in', w_size[0], 'w_out', w_size[1])
     # The previously obtained dataset is divided into training and testing examples
     idx = int(len(dataset) * split[0])
-    X_test, y_test = dataset[idx:, :w_size[0]], dataset[idx:,w_size[0]:]  # last 20% of dataset is reserved for testing
+    X_test, y_test = dataset[idx:, :w_size[0]], dataset[idx:,-w_size[1]:]  # last 20% of dataset is reserved for testing
+
     # the other 80% is divided again in 80% training 20% validation
     X_train, X_val, y_train, y_val = train_test_split(dataset[:idx, :w_size[0]],
-                                                      dataset[:idx, w_size[0]:],test_size=split[1])
+                                                      dataset[:idx, -w_size[1]:],test_size=split[1])
 
     X_train = np.reshape(X_train, (len(X_train), w_size[0], 1))
     X_val   = np.reshape(X_val,   (len(X_val),   w_size[0], 1))
     X_test  = np.reshape(X_test,  (len(X_test),  w_size[0], 1))
 
-    print('Training data shape   X=', X_train.shape,' y=', y_train.shape,)
+    print('Training data shape   X=', X_train.shape,'y=', y_train.shape,)
     print('Validation data shape X=', X_val.shape,  ' y=', y_val.shape)
     print('Test data shape       X=', X_test.shape, ' y=', y_test.shape)
 
-    return X_train, X_test, X_val, y_train, y_test, y_val
+    return X_train, X_test, X_val, y_train, y_test, y_val, idx
 
 
 def MAPE(Y, Yhat):
@@ -310,7 +320,7 @@ def SMAPE(Y, Yhat):
     return smape
 
 
-def model_training(X_train, X_val, y_train, y_val, w_size):
+def model_training(X_train, X_val, y_train, y_val, w_size, num_model):
     '''
     The function trains a recursive neural network with 2 GRU layes and a fully connected one, to predict a future
     windows of the signal.
@@ -320,12 +330,14 @@ def model_training(X_train, X_val, y_train, y_val, w_size):
     :param y_val:
     :param w_size:
     '''
-    print('\n----  Training phase ----')
+    if num_model == 1:
+        print('\n----  Training phase ----')
+    print('Training model '+str(num_model)+ '\n')
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
     input_window_size  = w_size[0]  # number of samples per channel used to feed the NN
     output_window_size = w_size[1]
-    batch_size         = 25
+    batch_size         = 2
     training_epochs    = 100
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
@@ -340,8 +352,6 @@ def model_training(X_train, X_val, y_train, y_val, w_size):
 
     # Neural Network model ---------------------------------------------------------------------------------------------
     model = Sequential()
-
-    #model.add(Reshape((input_window_size,num_features), input_shape=([input_window_size])))
 
     # Layer 1
     model.add(GRU(units            = RNN_neurons[0],
@@ -366,9 +376,6 @@ def model_training(X_train, X_val, y_train, y_val, w_size):
                   return_sequences = False,  # set to true is following layer is recurrent
                   stateful         = False))
 
-    #model.add(Flatten())
-
-
     # Layer 3
     model.add(Dense(units      = full_conn[1],
                     activation = activation[2],
@@ -380,8 +387,8 @@ def model_training(X_train, X_val, y_train, y_val, w_size):
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
 
-    #opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-    opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+    opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+    #opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
 
     # Losses
     loss = ['mean_squared_error', 'mean_absolute_error',
@@ -417,34 +424,37 @@ def model_training(X_train, X_val, y_train, y_val, w_size):
                         shuffle         =False,                  # data is not shuffled from epoch to epoch.
                         callbacks       =[tbCallback]) # save graph and other data for visualization with tensorboard.
 
-    score = model.evaluate(X_train, y_train, verbose=1, batch_size=batch_size)
-    print('\nTraining loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
+    score = model.evaluate(X_train, y_train, verbose=0, batch_size=batch_size)
+    print('\nTraining loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
+          ' SMAPE='+"{0:.3f}".format(score[2]))
 
-    score = model.evaluate(X_val, y_val, verbose=1, batch_size=batch_size)
-    print('\nValidation loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
+    score = model.evaluate(X_val, y_val, verbose=0, batch_size=batch_size)
+    print('Validation loss: mae= '+"{0:.2e}".format( score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
+          ' SMAPE= '+"{0:.2f}".format(score[2]))
 
     # Model saving -----------------------------------------------------------------------------------------------------
-    model.save(output_path +sep+ 'models'+sep+'RNN_model.pkl')  # save model within the directory specified by path
-
+    model.save(output_path +sep+ 'models'+sep+'RNN_model_'+str(num_model)+'.pkl')  # save model within the directory specified by path
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
-    print('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
+    print('\mtensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1\n')
 
 
-
-def model_test(X,y):
+def model_test(X,y,num_model):
     '''
-    The function perform the test score assessment, and plots the true signal vs the predicted one.
+    The function perform the test score assessment, and plots the true signal vs the predicted one, for each model trained.
     :param X:
     :param y:
     :return:
     '''
-    print('\n----  Test phase  ----')
+    if num_model == 1:
+        print('\n----  Test phase  ----')
+    print('Testing model ' + str(num_model))
     # Performances evaluation ------------------------------------------------------------------------------------------
-    model = load_model(output_path + sep + 'models' + sep + 'RNN_model.pkl', custom_objects={'SMAPE': SMAPE})
-    score = model.evaluate(X, y, verbose=2, batch_size=25)
-    print('Test loss: mae=', score[0], ', and metrics mse=', score[1], ' SMAPE=', score[2])
+    model = load_model(output_path + sep + 'models' + sep + 'RNN_model_'+str(num_model)+'.pkl', custom_objects={'SMAPE': SMAPE})
+    score = model.evaluate(X, y, verbose=0, batch_size=2)
+    print('Test loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+ ' SMAPE= '+
+          "{0:.2f}".format( score[2]) + '\n')
 
     # Predictions visualization ----------------------------------------------------------------------------------------
     if not path.exists(output_path + sep + 'images' + sep + 'predictions'):  # create directory is not present
@@ -463,27 +473,98 @@ def model_test(X,y):
     plt.plot(x, y_hat, linewidth=0.5, color='red', marker='o', markersize=1)
     plt.legend(['true serie', 'predicted serie'], loc='upper right')
     plt.ylim([0, 1])
-    plt.savefig(output_path + sep + 'images' + sep + 'data_prediction_.pdf', bbox_inches='tight', dpi=600)
+    plt.savefig(output_path + sep + 'images' + sep + 'data_prediction_'+str(num_model)+'.pdf', bbox_inches='tight', dpi=600)
     plt.close()
 
 
-    exit(0)
-    for i in range(0, y_hat.shape[0], y_hat.shape[1]):
-        #y_hat = model.predict(np.reshape(X[i],(1,X[i].shape[0],X[i].shape[1])))   # fare in blocco, e gestire dopo il plot
-        plt.figure()
-        plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Trend visualization')
-        plt.grid(True), plt.hold
+def recursive_prediction(X,idx,w_size, w_size2, w_size3, ensemble):
+    '''
+    The function takes the previously trained model and perform the ensembling while execute recursive forecasting/predictions
+    using predicted values as new input (just for model 1). Other two models refer to past data which is available.
 
-        x = np.linspace(0, len(y[i]) + 1, len(y[i]))
-        plt.plot(x, y[i], linewidth=0.5, marker='o', markersize=1)
+    GRAND SCHEME EXPLANATION: All models predicts next 10 days, then a new input data for model 1 is create by
+    using the 10 predicted values and last 20 samples of previous serie. For other two models we just shift the windows
+    and it is not necessary to use predicted values in next step prediction.
+    This gives strenght and resiliance to model 1 problems due to derive in predictions.
 
-        plt.plot(x, y_hat[i], linewidth=0.5, color='red', marker='o', markersize=1)
-        plt.legend(['true serie', 'predicted serie'], loc='upper right')
-        plt.ylim([0, 1])
-        plt.savefig(output_path + sep + 'images' + sep +'predictions'+ sep + 'data_prediction_' + str(i)
-                    + '.pdf',bbox_inches='tight')
-        plt.close()
+    :param X1:
+    :param X2:
+    :param X3:
+    :param y1:
+    :param y2:
+    :param y3:
+    :return:
+    '''
+    print('\n----  Ensemble model investigation  ----')
+    model2,model3 = [],[]
+    model1 = load_model(output_path + sep + 'models' + sep + 'RNN_model_1.pkl', custom_objects={'SMAPE': SMAPE})
+    if ensemble:
+        model2 = load_model(output_path + sep + 'models' + sep + 'RNN_model_2.pkl', custom_objects={'SMAPE': SMAPE})
+        model3 = load_model(output_path + sep + 'models' + sep + 'RNN_model_3.pkl', custom_objects={'SMAPE': SMAPE})
 
+
+    y_new =np.reshape(X[idx+w_size[0]:],-1)
+    iter =  (X.shape[0]-w_size[1]-idx)//w_size[0]
+    print('Number of input iterations: ', iter)
+    offset = 365
+    input, input2, input3 = [], [], []
+    for i in range(iter):
+        #print(idx+i*w_size[0],idx+ (i+1)*w_size[0])
+        input.append(X[idx+i*w_size[0]: idx+ (i+1)*w_size[0]])
+
+    for i in range(iter*3):
+        #print(idx - offset + i * w_size[1], idx - offset + w_size[0] + i * w_size[1])
+        input2.append(X[idx - offset + i * w_size[1] :idx - offset + w_size[0] +i * w_size[1]])
+
+    for i in range(iter*3):
+        #print(idx - offset + w_size[0] + i * w_size[1], idx - offset + w_size[0] + (i + 1) * w_size[1])
+        input3.append(X[idx - offset + w_size[0] + i * w_size[1] : idx - offset + w_size[0] + (i + 1) * w_size[1]])
+    # prendere1 input da 30 per ogni mese, dopo di che iterare la predizione con i valori predetti allo step prima
+
+    print(len(input),len(input2),len(input3))
+    print(np.reshape(input[0],    (1, len(input[0]),  1)).shape)
+
+    y_hat=0
+    total_sequence=[]
+    for i in range(len(input)):
+        print(input3[i * 3])
+        y_pred1  = model1.predict(np.reshape(input[i],      (1, w_size[0],  1)))
+        y2_pred1 = model2.predict(np.reshape(input2[i * 3], (1, w_size2[0], 1)))
+        y3_pred1 = model3.predict(np.reshape(input3[i * 3], (1, w_size3[0], 1)))
+        avg_pred = (y_pred1[0]+ y2_pred1[0]+ y3_pred1[0])/3
+
+        temp     = np.append(input[i][w_size[1]:], avg_pred)
+
+        y_pred2  = model1.predict(np.reshape(temp,(1, len(temp), 1)))
+        y2_pred2 = model2.predict(np.reshape(input2[i * 3 + 1], (1, w_size2[0], 1)))
+        y3_pred2 = model3.predict(np.reshape(input3[i * 3 + 1], (1, w_size3[0], 1)))
+        avg_pred = (y_pred2[0] + y2_pred2[0] + y3_pred2[0]) / 3
+
+        temp     = np.append(temp[w_size[1]:], avg_pred)
+
+        y_pred3  = model1.predict(np.reshape(temp,(1, len(temp), 1)))
+        y2_pred3 = model2.predict(np.reshape(input2[i * 3 + 2], (1, w_size2[0], 1)))
+        y3_pred3 = model3.predict(np.reshape(input3[i * 3 + 2], (1, w_size3[0], 1)))
+        avg_pred = (y_pred3[0] + y2_pred3[0] + y3_pred3[0]) / 3
+
+        y_hat    = np.append(temp[w_size[1]:], avg_pred)
+        total_sequence.append(y_hat)
+
+    y_hat = np.reshape(np.asarray(total_sequence),-1)
+
+    print(y_hat.shape)
+    plt.figure()
+    plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Prediction comparison')
+    plt.grid(True), plt.hold
+
+    x = np.linspace(0, y_hat.shape[0] + 1, y_hat.shape[0])
+    plt.plot(x, y_new[0:y_hat.shape[0]], linewidth=0.5, marker='o', markersize=1)
+
+    plt.plot(x, y_hat, linewidth=0.5, color='red', marker='o', markersize=1)
+    plt.legend(['true serie', 'predicted serie'], loc='upper right')
+    plt.ylim([0, 1])
+    plt.savefig(output_path + sep + 'images' + sep + 'data_recursive_prediction.pdf', bbox_inches='tight', dpi=600)
+    plt.close()
 
 
 #Main
@@ -492,11 +573,15 @@ if __name__ == '__main__':
     filename = 'ts_forecast.csv'
     save_figure = True
     montly_view = False
-    filter = True
+    filter      = False
+    ensemble    = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
-    w_size=[30,10]
-    split = [0.8,0.2]   # used to split data, first the dataset is divided in training + validation 80% and test 20%
+
+    w_size  = [30, 10]
+    w_size2 = [30, 10]
+    w_size3 = [10, 10]
+    split   = [0.8,0.2] # used to split data, first the dataset is divided in training + validation 80% and test 20%
                         # then validation is chosen as 20% of the first part
 
     # Functions call ----------------------------
@@ -516,19 +601,36 @@ if __name__ == '__main__':
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-    X_train, X_test, X_val, y_train, y_test, y_val = dataset_split(income_new,w_size,split)
+    X_train, X_test, X_val, y_train, y_test, y_val, idx = dataset_split(income_new,w_size,split,ensemble, num_model=1)
+    X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, X_train3, X_test3, X_val3, y_train3, y_test3, y_val3=\
+        [],[],[],[],[],[],[],[],[],[],[],[]
+    if ensemble: # if ensemble is enalble then we compute the dataset split also for the additional models
+        X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, _ = dataset_split(income_new, w_size2, split, ensemble, num_model=2)
+        X_train3, X_test3, X_val3, y_train3, y_test3, y_val3, _ = dataset_split(income_new, w_size3, split, ensemble, num_model=3)
+
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-   # model_training(X_train, X_val, y_train, y_val, w_size)
+    # model_training(X_train, X_val, y_train, y_val, w_size,  num_model=1)
+    # if ensemble:    # if ensemble is enalble then we train also the two additional models
+    #    model_training(X_train2, X_val2, y_train2, y_val2, w_size2, num_model=2)
+    #    model_training(X_train3, X_val3, y_train3, y_val3, w_size3, num_model=3)
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
 
-    model_test(X_test,y_test)
+    # model_test(X_test, y_test, num_model=1)
+    # if ensemble:
+    #     model_test(X_test2, y_test2, num_model=2)
+    #     model_test(X_test3, y_test3, num_model=3)
 
-    print(time.time() - t)
+    print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
+    t = time.time()
+
+    recursive_prediction( np.reshape(income_new,-1), idx, w_size, w_size2, w_size3, ensemble)
+
+
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
 
     # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
