@@ -50,7 +50,6 @@ def load_data(filename):
         print('Some error occurred during data loading.')
         exit(0)
 
-
     print('Data successfully loaded')
 
     return dates, income
@@ -521,9 +520,6 @@ def recursive_prediction(X,idx,w_size, w_size2, w_size3, ensemble):
         input3.append(X[idx - offset + w_size[0] + i * w_size[1] : idx - offset + w_size[0] + (i + 1) * w_size[1]])
     # prendere1 input da 30 per ogni mese, dopo di che iterare la predizione con i valori predetti allo step prima
 
-    print(len(input),len(input2),len(input3))
-    print(np.reshape(input[0],    (1, len(input[0]),  1)).shape)
-
     y_hat=0
     total_sequence=[]
     for i in range(len(input)):
@@ -552,7 +548,13 @@ def recursive_prediction(X,idx,w_size, w_size2, w_size3, ensemble):
 
     y_hat = np.reshape(np.asarray(total_sequence),-1)
 
-    print(y_hat.shape)
+    nyq = 0.5 * 1  # Filtering parameters
+    normalCutoff = 0.06 / nyq
+    b, a = signal.butter(4, normalCutoff, btype='low', analog=False)
+    y_hat = signal.filtfilt(b, a, y_hat)
+
+    # Density estimation
+
     plt.figure()
     plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Prediction comparison')
     plt.grid(True), plt.hold
@@ -573,7 +575,7 @@ if __name__ == '__main__':
     filename = 'ts_forecast.csv'
     save_figure = True
     montly_view = False
-    filter      = False
+    filter      = True
     ensemble    = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
@@ -587,6 +589,8 @@ if __name__ == '__main__':
     # Functions call ----------------------------
     t=time.time()
     dates, income = load_data(filename)
+    print('Media dati'+  "{0:.2f}".format(np.nanmean(income)))
+    print('Varianza dati'+  "{0:.2f}".format(np.nanstd(income)))
 
     print('Performed in ' + "{0:.2f}".format(time.time()-t) + ' seconds.')
     t = time.time()
