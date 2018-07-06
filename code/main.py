@@ -502,8 +502,8 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
 
 
         model = Model(inputs=input, outputs=[Branch1,Branch2,Branch3,output], name='MultiBranchNetwork')
-        model.summary()
-        exit(0)
+        #model.summary()
+
 
         opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         # opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
@@ -524,10 +524,11 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         metrics = ['mse', SMAPE]  # and loss
         keras.objectives.custom_loss = SMAPE
 
+
     else:
         print('No valid model has been selected')
 
-    #model.summary()                     # print details of the neural network
+    model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
 
@@ -547,15 +548,27 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
 
     # Training ---------------------------------------------------------------------------------------------------------
     # If stateless RNN are used, standard fit is employed.
-    history = model.fit(x               =X_train,  # X data
-                        y               =y_train,  # Y data
-                        epochs          =training_epochs,        # number of fit iteration across all training set
-                        batch_size      =batch_size,             # number of training samples preprocessed in parallel.
-                        verbose         =2,                      # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
-                        #validation_split=0.2,                   # float (0. < x < 1). Fraction of the data to use as held-out validation data.
-                        validation_data = (X_val,y_val),
-                        shuffle         =False,                  # data is not shuffled from epoch to epoch.
-                        callbacks       =[tbCallback]) # save graph and other data for visualization with tensorboard.
+    history = []
+    if arch_type == 0:
+        history = model.fit(x               =X_train,  # X data
+                            y               =y_train,  # Y data
+                            epochs          =training_epochs,        # number of fit iteration across all training set
+                            batch_size      =batch_size,             # number of training samples preprocessed in parallel.
+                            verbose         =2,                      # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
+                            #validation_split=0.2,                   # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                            validation_data = (X_val,y_val),
+                            shuffle         =False,                  # data is not shuffled from epoch to epoch.
+                            callbacks       =[tbCallback]) # save graph and other data for visualization with tensorboard.
+    elif arch_type == 1:
+        history = model.fit(x=X_train,  # X data
+                            y=y_train,  # Y data
+                            epochs=training_epochs,  # number of fit iteration across all training set
+                            batch_size=batch_size,  # number of training samples preprocessed in parallel.
+                            verbose=2,  # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
+                            # validation_split=0.2,                   # float (0. < x < 1). Fraction of the data to use as held-out validation data.
+                            validation_data=(X_val, y_val),
+                            shuffle=False,  # data is not shuffled from epoch to epoch.
+                            callbacks=[tbCallback])  # save graph and other data for visualization with tensorboard.
 
     score = model.evaluate(X_train, y_train, verbose=0, batch_size=batch_size)
     print('\nTraining loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
