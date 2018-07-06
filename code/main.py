@@ -16,7 +16,7 @@ from dateutil   import relativedelta
 import keras
 import keras.objectives
 from keras.models       import Model, Sequential, load_model
-from keras.layers       import LSTM, GRU, Reshape, Input, Dense, Flatten, Reshape, Activation, Dropout, Input
+from keras.layers       import LSTM, GRU, Reshape, Input, Dense, Flatten, Reshape, Activation, Dropout, Input, Concatenate
 from keras.layers.normalization       import BatchNormalization
 from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
@@ -468,7 +468,7 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
         x = Activation(activation[1])(x)
         x = BatchNormalization()(x)
-        x = Flatten()(x)
+
         x = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(x)
         Branch1 = Activation(activation[1], name='Branch1')(x)
 
@@ -479,7 +479,6 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(y)
         y = Activation(activation[1])(y)
         y = BatchNormalization()(y)
-        y = Flatten()(y)
         y = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(y)
         Branch2 = Activation(activation[1], name='Branch2')(y)
 
@@ -490,16 +489,17 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(z)
         z = Activation(activation[1])(z)
         z = BatchNormalization()(z)
-        z = Flatten()(z)
         z = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(z)
         Branch3 = Activation(activation[1], name='Branch3')(z)
 
         # Merge branches
-        w = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)([Branch1,Branch2,Branch3])
+        merge = Concatenate(axis=-1)([Branch1,Branch2,Branch3])
+        w = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(merge)
         w = Activation(activation[1])(w)
         w = BatchNormalization()(w)
         w = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(w)
         output = Activation(activation[1], name='output')(w)
+
 
         model = Model(inputs=input, outputs=[Branch1,Branch2,Branch3,output], name='MultiBranchNetwork')
         model.summary()
