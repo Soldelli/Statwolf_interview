@@ -462,32 +462,35 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         input = Input(shape=(input_window_size, num_features))
 
         #Branch 1   ------
-        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
         x = Activation(activation[1])(x)
         x = BatchNormalization()(x)
         x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
         x = Activation(activation[1])(x)
         x = BatchNormalization()(x)
+        x = Flatten()(x)
         x = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(x)
         Branch1 = Activation(activation[1], name='Branch1')(x)
 
         # Branch 2   ------
-        y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
         y = Activation(activation[1])(y)
         y = BatchNormalization()(y)
         y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(y)
         y = Activation(activation[1])(y)
         y = BatchNormalization()(y)
+        y = Flatten()(y)
         y = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(y)
         Branch2 = Activation(activation[1], name='Branch2')(y)
 
         # Branch 3   ------
-        z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
         z = Activation(activation[1])(z)
         z = BatchNormalization()(z)
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(z)
         z = Activation(activation[1])(z)
         z = BatchNormalization()(z)
+        z = Flatten()(z)
         z = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(z)
         Branch3 = Activation(activation[1], name='Branch3')(z)
 
