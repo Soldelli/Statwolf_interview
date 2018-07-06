@@ -16,7 +16,8 @@ from dateutil   import relativedelta
 import keras
 import keras.objectives
 from keras.models       import Model, Sequential, load_model
-from keras.layers       import LSTM, Dropout, GRU, Reshape, Input, Dense, Flatten, Reshape
+from keras.layers       import LSTM, GRU, Reshape, Input, Dense, Flatten, Reshape, Activation, Dropout, Input
+from keras.layers.normalization       import BatchNormalization
 from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard, Callback
@@ -304,6 +305,53 @@ def dataset_split(x, w_size, split, ensemble, num_model):
     return X_train, X_test, X_val, y_train, y_test, y_val, idx
 
 
+def dataset_split2(x, w_size, split, ensemble):
+    '''The function splits the dataset into training, validation and test'''
+    # Training set construction ----------------------------------------------------------------------------------------
+    # The following function takes advantage of dataframe shift function to create sliding windowd representation of the
+    # time series
+    datase = []
+
+    print('\n----  Performing data split  ----')
+    dataset = np.asarray(series_to_supervised(x, n_in=w_size[0], n_out=w_size[1], dropnan=True).values.tolist())
+
+    print('Window sizes: win_in', w_size[0], 'w_out', w_size[1])
+
+    # The previously obtained dataset is divided into training and testing examples
+    idx = int(len(dataset) * split[0])
+    X_test, y_test = dataset[idx:, :w_size[0]], dataset[idx:,-w_size[1]:]  # last 20% of dataset is reserved for testing
+
+    # the other 80% is divided again in 80% training 20% validation
+    X_train, X_val, y_train, y_val = train_test_split(dataset[:idx, :w_size[0]],
+                                                      dataset[:idx, -w_size[1]:],test_size=split[1])
+
+    X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1 = X_train[:,:15],  X_val[:,:15],  y_train[:,:15],  y_val[:,:15]
+    X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2 = X_train[:,8:23], X_val[:,8:23], y_train[:,8:23], y_val[:,8:23]
+    X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3 = X_train[:,15:],  X_val[:,15:],  y_train[:,15:],  y_val[:,15:]
+
+    X_train_opt1 = np.reshape(X_train_opt1, (len(X_train_opt1), 15, 1))
+    X_val_opt1   = np.reshape(X_val_opt1,   (len(X_val_opt1),   15, 1))
+    X_train_opt2 = np.reshape(X_train_opt2, (len(X_train_opt2), 15, 1))
+    X_val_opt2   = np.reshape(X_val_opt2,   (len(X_val_opt2),   15, 1))
+    X_train_opt3 = np.reshape(X_train_opt3, (len(X_train_opt3), 15, 1))
+    X_val_opt3   = np.reshape(X_val_opt3,   (len(X_val_opt3),   15, 1))
+
+
+    X_train = np.reshape(X_train, (len(X_train), w_size[0], 1))
+    X_val   = np.reshape(X_val,   (len(X_val),   w_size[0], 1))
+    X_test  = np.reshape(X_test,  (len(X_test),  w_size[0], 1))
+
+    print('Training data shape   X=', X_train.shape,'y=', y_train.shape,)
+    print('Validation data shape X=', X_val.shape,  ' y=', y_val.shape)
+    print('Test data shape       X=', X_test.shape, ' y=', y_test.shape)
+
+    opt=[X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1,
+         X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2,
+         X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3]
+
+    return X_train, X_test, X_val, y_train, y_test, y_val, idx, opt
+
+
 def MAPE(Y, Yhat):
     diff = K.abs((Y - Yhat) / K.clip(K.abs(Y),
                                             K.epsilon(),
@@ -319,7 +367,7 @@ def SMAPE(Y, Yhat):
     return smape
 
 
-def model_training(X_train, X_val, y_train, y_val, w_size, num_model):
+def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type, opt_data):
     '''
     The function trains a recursive neural network with 2 GRU layes and a fully connected one, to predict a future
     windows of the signal.
@@ -341,7 +389,7 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model):
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
     RNN_neurons = [20, 20]  # Defines the number of neurons of the recurrent layers
-    full_conn   = [input_window_size, output_window_size]  # Number of neurons of dense layers (fully connected)
+    full_conn   = [input_window_size, output_window_size,50,50]  # Number of neurons of dense layers (fully connected)
     dropout     = [0.0,0.0]  # Definition of Dropout probabilities
     activation  = ['relu','tanh', 'sigmoid']
 
@@ -349,53 +397,136 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model):
     kernel_init = VarianceScaling(scale=1.0, mode='fan_avg', distribution='normal', seed=None)
     bias_init = Constant(value=0.1)
 
-    # Neural Network model ---------------------------------------------------------------------------------------------
-    model = Sequential()
+    model, opt, loss, metrics = [], [], [], []
+    X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1 = [],[],[],[]
+    X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2 = [],[],[],[]
+    X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3 = [],[],[],[]
 
-    # Layer 1
-    model.add(GRU(units            = RNN_neurons[0],
-                  activation       = activation[1],  # tanh
-                  kernel_initializer=kernel_init,
-                  use_bias         = True,
-                  bias_initializer = bias_init,
-                  dropout          = dropout[0],
-                  return_sequences = True,  # set to true is following layer is recurrent
-                  input_shape      = (None, input_window_size, num_features),
-                  batch_input_shape= [None, input_window_size, num_features],
-                  batch_size       = None,
-                  stateful         = False))
+    try:
+        X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1,\
+               X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2,\
+                    X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3 = opt_data        # unpacking optional data
+    except:
+        if arch_type==1:
+            print('Optional data unpacking problem.')
+            exit(0)
 
-    # Layer 2
-    model.add(GRU(units            = RNN_neurons[1],
-                  activation       = activation[1],
-                  kernel_initializer=kernel_init,
-                  use_bias         = True,
-                  bias_initializer = bias_init,
-                  dropout          = dropout[1],
-                  return_sequences = False,  # set to true is following layer is recurrent
-                  stateful         = False))
+    if arch_type == 0:
+        # Neural Network model ---------------------------------------------------------------------------------------------
+        model = Sequential()
 
-    # Layer 3
-    model.add(Dense(units      = full_conn[1],
-                    activation = activation[2],
-                    use_bias   = True,
-                    kernel_initializer = kernel_init,
-                    bias_initializer   = bias_init))
+        # Layer 1
+        model.add(GRU(units            = RNN_neurons[0],
+                      activation       = activation[1],  # tanh
+                      kernel_initializer=kernel_init,
+                      use_bias         = True,
+                      bias_initializer = bias_init,
+                      dropout          = dropout[0],
+                      return_sequences = True,  # set to true is following layer is recurrent
+                      input_shape      = (None, input_window_size, num_features),
+                      batch_input_shape= [None, input_window_size, num_features],
+                      batch_size       = None,
+                      stateful         = False))
+
+        # Layer 2
+        model.add(GRU(units            = RNN_neurons[1],
+                      activation       = activation[1],
+                      kernel_initializer=kernel_init,
+                      use_bias         = True,
+                      bias_initializer = bias_init,
+                      dropout          = dropout[1],
+                      return_sequences = False,  # set to true is following layer is recurrent
+                      stateful         = False))
+
+        # Layer 3
+        model.add(Dense(units      = full_conn[1],
+                        activation = activation[2],
+                        use_bias   = True,
+                        kernel_initializer = kernel_init,
+                        bias_initializer   = bias_init))
+
+        opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+        # opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+
+        # Losses
+        loss = ['mean_squared_error', 'mean_absolute_error',
+                'mean_squared_logarithmic_error']
+
+        # Metrics
+        metrics = ['mse', SMAPE]  # and loss
+        keras.objectives.custom_loss = SMAPE
+
+    elif arch_type == 1:
+        print('LO STO COSTRUENDO')
+
+        input = Input(shape=(input_window_size, num_features))
+
+        #Branch 1   ------
+        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        x = Activation(activation[1])(x)
+        x = BatchNormalization()(x)
+        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
+        x = Activation(activation[1])(x)
+        x = BatchNormalization()(x)
+        x = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(x)
+        Branch1 = Activation(activation[1], name='Branch1')(x)
+
+        # Branch 2   ------
+        y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        y = Activation(activation[1])(y)
+        y = BatchNormalization()(y)
+        y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(y)
+        y = Activation(activation[1])(y)
+        y = BatchNormalization()(y)
+        y = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(y)
+        Branch2 = Activation(activation[1], name='Branch2')(y)
+
+        # Branch 3   ------
+        z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
+        z = Activation(activation[1])(z)
+        z = BatchNormalization()(z)
+        z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(z)
+        z = Activation(activation[1])(z)
+        z = BatchNormalization()(z)
+        z = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(z)
+        Branch3 = Activation(activation[1], name='Branch3')(z)
+
+        # Merge branches
+        w = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)([Branch1,Branch2,Branch3])
+        w = Activation(activation[1])(w)
+        w = BatchNormalization()(w)
+        w = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(w)
+        output = Activation(activation[1], name='output')(w)
+
+        model = Model(inputs=input, outputs=[Branch1,Branch2,Branch3,output], name='MultiBranchNetwork')
+        model.summary()
+        exit(0)
+
+        opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+        # opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+
+        # Losses
+        # ['mean_squared_error', 'mean_absolute_error','mean_squared_logarithmic_error']
+        loss = {'Branch1' : ['mean_squared_error'],
+                'Branch2' : ['mean_squared_error'],
+                'Branch3' : ['mean_squared_error'],
+                'output'  : ['mean_squared_error']}
+
+        lossWeights = { 'Branch1' : 1.0,
+                        'Branch2' : 1.0,
+                        'Branch3' : 1.0,
+                        'output'  : 1.0,}
+
+        # Metrics
+        metrics = ['mse', SMAPE]  # and loss
+        keras.objectives.custom_loss = SMAPE
+
+    else:
+        print('No valid model has been selected')
 
     #model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
-
-    opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-    #opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
-
-    # Losses
-    loss = ['mean_squared_error', 'mean_absolute_error',
-            'mean_squared_logarithmic_error']
-
-    # Metrics
-    metrics = ['mse', SMAPE]  # and loss
-    keras.objectives.custom_loss = SMAPE
 
     model.compile(optimizer = opt,
                   loss      = 'mae',    # mean absolute error
@@ -579,10 +710,12 @@ if __name__ == '__main__':
     ensemble    = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
+    arch_type = 1
 
     w_size  = [30, 10]
     w_size2 = [30, 10]
     w_size3 = [10, 10]
+    w_size_branch = [30, 30]
     split   = [0.8,0.2] # used to split data, first the dataset is divided in training + validation 80% and test 20%
                         # then validation is chosen as 20% of the first part
 
@@ -605,29 +738,37 @@ if __name__ == '__main__':
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-    X_train, X_test, X_val, y_train, y_test, y_val, idx = dataset_split(income_new,w_size,split,ensemble, num_model=1)
-    X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, X_train3, X_test3, X_val3, y_train3, y_test3, y_val3=\
-        [],[],[],[],[],[],[],[],[],[],[],[]
-    if ensemble: # if ensemble is enalble then we compute the dataset split also for the additional models
-        X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, _ = dataset_split(income_new, w_size2, split, ensemble, num_model=2)
-        X_train3, X_test3, X_val3, y_train3, y_test3, y_val3, _ = dataset_split(income_new, w_size3, split, ensemble, num_model=3)
+    X_train, X_test, X_val, y_train, y_test, y_val, X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, X_train3, \
+    X_test3, X_val3, y_train3, y_test3, y_val3, opt, idx = [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], \
+                                                      [], [],[], [], []
+
+
+    if not arch_type:
+        X_train, X_test, X_val, y_train, y_test, y_val, idx = dataset_split(income_new,w_size,split,ensemble, num_model=1)
+
+        if ensemble: # if ensemble is enalble then we compute the dataset split also for the additional models
+            X_train2, X_test2, X_val2, y_train2, y_test2, y_val2, _ = dataset_split(income_new, w_size2, split, ensemble, num_model=2)
+            X_train3, X_test3, X_val3, y_train3, y_test3, y_val3, _ = dataset_split(income_new, w_size3, split, ensemble, num_model=3)
+    else:
+        X_train, X_test, X_val, y_train, y_test, y_val, idx, opt = \
+            dataset_split2(income_new, w_size_branch, split, ensemble)
 
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-    # model_training(X_train, X_val, y_train, y_val, w_size,  num_model=1)
-    # if ensemble:    # if ensemble is enalble then we train also the two additional models
-    #    model_training(X_train2, X_val2, y_train2, y_val2, w_size2, num_model=2)
-    #    model_training(X_train3, X_val3, y_train3, y_val3, w_size3, num_model=3)
+    model_training(X_train, X_val, y_train, y_val, w_size,  num_model=1, arch_type=arch_type, opt_data=opt)
+    if ensemble:    # if ensemble is enalble then we train also the two additional models
+       model_training(X_train2, X_val2, y_train2, y_val2, w_size2, num_model=2, arch_type=arch_type, opt_data=[])
+       model_training(X_train3, X_val3, y_train3, y_val3, w_size3, num_model=3, arch_type=arch_type, opt_data=[])
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
 
-    # model_test(X_test, y_test, num_model=1)
-    # if ensemble:
-    #     model_test(X_test2, y_test2, num_model=2)
-    #     model_test(X_test3, y_test3, num_model=3)
+    model_test(X_test, y_test, num_model=1)
+    if ensemble:
+        model_test(X_test2, y_test2, num_model=2)
+        model_test(X_test3, y_test3, num_model=3)
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
