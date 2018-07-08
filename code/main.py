@@ -21,6 +21,7 @@ from keras.layers.normalization       import BatchNormalization
 from keras.optimizers   import Nadam, SGD, Adam
 from keras.initializers import Constant, VarianceScaling
 from keras.callbacks    import TensorBoard, Callback
+from keras.utils        import plot_model
 from keras              import backend as K
 
 
@@ -325,16 +326,16 @@ def dataset_split2(x, w_size, split, ensemble):
     X_train, X_val, y_train, y_val = train_test_split(dataset[:idx, :w_size[0]],
                                                       dataset[:idx, -w_size[1]:],test_size=split[1])
 
-    X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1 = X_train[:,:15],  X_val[:,:15],  y_train[:,:15],  y_val[:,:15]
-    X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2 = X_train[:,8:23], X_val[:,8:23], y_train[:,8:23], y_val[:,8:23]
-    X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3 = X_train[:,15:],  X_val[:,15:],  y_train[:,15:],  y_val[:,15:]
+    X_train_opt1, X_val_opt1, y_train_opt1, y_val_opt1 = X_train[:,:12],  X_val[:,:12],  y_train[:,:12],  y_val[:,:12]
+    X_train_opt2, X_val_opt2, y_train_opt2, y_val_opt2 = X_train[:,9:21], X_val[:,9:21], y_train[:,9:21], y_val[:,9:21]
+    X_train_opt3, X_val_opt3, y_train_opt3, y_val_opt3 = X_train[:,18:],  X_val[:,18:],  y_train[:,18:],  y_val[:,18:]
 
-    X_train_opt1 = np.reshape(X_train_opt1, (len(X_train_opt1), 15, 1))
-    X_val_opt1   = np.reshape(X_val_opt1,   (len(X_val_opt1),   15, 1))
-    X_train_opt2 = np.reshape(X_train_opt2, (len(X_train_opt2), 15, 1))
-    X_val_opt2   = np.reshape(X_val_opt2,   (len(X_val_opt2),   15, 1))
-    X_train_opt3 = np.reshape(X_train_opt3, (len(X_train_opt3), 15, 1))
-    X_val_opt3   = np.reshape(X_val_opt3,   (len(X_val_opt3),   15, 1))
+    X_train_opt1 = np.reshape(X_train_opt1, (len(X_train_opt1), 12, 1))
+    X_val_opt1   = np.reshape(X_val_opt1,   (len(X_val_opt1),   12, 1))
+    X_train_opt2 = np.reshape(X_train_opt2, (len(X_train_opt2), 12, 1))
+    X_val_opt2   = np.reshape(X_val_opt2,   (len(X_val_opt2),   12, 1))
+    X_train_opt3 = np.reshape(X_train_opt3, (len(X_train_opt3), 12, 1))
+    X_val_opt3   = np.reshape(X_val_opt3,   (len(X_val_opt3),   12, 1))
 
 
     X_train = np.reshape(X_train, (len(X_train), w_size[0], 1))
@@ -379,19 +380,22 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
     '''
     if num_model == 1:
         print('\n----  Training phase ----')
-    print('Training model '+str(num_model)+ '\n')
+    if arch_type == 0:
+        print('Training model '+str(num_model)+ '\n')
+    else:
+        print('Training model Multi Branch Neural Network\n')
     # model parameters -------------------------------------------------------------------------------------------------
     num_features = 1
     input_window_size  = w_size[0]  # number of samples per channel used to feed the NN
     output_window_size = w_size[1]
-    batch_size         = 2
-    training_epochs    = 100
+    batch_size         = 4
+    training_epochs    = 50
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
-    RNN_neurons = [20, 20]  # Defines the number of neurons of the recurrent layers
-    full_conn   = [input_window_size, output_window_size,50,50]  # Number of neurons of dense layers (fully connected)
-    dropout     = [0.0,0.0]  # Definition of Dropout probabilities
-    activation  = ['relu','tanh', 'sigmoid']
+    RNN_neurons = [50, 50]  # Defines the number of neurons of the recurrent layers
+    full_conn   = [input_window_size, output_window_size,12,50,50]  # Number of neurons of dense layers (fully connected)
+    dropout     = [0.25,0.5]  # Definition of Dropout probabilities
+    activation  = ['relu','tanh', 'sigmoid','linear']
 
     # Definition of initializers for the weigths and biases of the dense layers.
     kernel_init = VarianceScaling(scale=1.0, mode='fan_avg', distribution='normal', seed=None)
@@ -457,84 +461,104 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         keras.objectives.custom_loss = SMAPE
 
     elif arch_type == 1:
-        print('LO STO COSTRUENDO')
 
         input = Input(shape=(input_window_size, num_features))
 
         #Branch 1   ------
         x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
-        x = Activation(activation[1])(x)
-        x = BatchNormalization()(x)
+        x = Activation(activation[0])(x)
+        #x = BatchNormalization()(x)
+        x = Dropout(dropout[0])(x)
         x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
-        x = Activation(activation[1])(x)
-        x = BatchNormalization()(x)
-
-        x = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(x)
-        Branch1 = Activation(activation[1], name='Branch1')(x)
+        x = Activation(activation[0])(x)
+        #x = BatchNormalization()(x)
+        x = Dropout(dropout[0])(x)
+        x = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(x)
+        x = Activation(activation[0])(x)
+        #x = BatchNormalization()(x)
+        x = Dropout(dropout[0])(x)
+        x1 = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(x)
+        Branch1 = Activation(activation[2], name='Branch1')(x1)
 
         # Branch 2   ------
         y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
-        y = Activation(activation[1])(y)
-        y = BatchNormalization()(y)
+        y = Activation(activation[0])(y)
+        #y = BatchNormalization()(y)
+        y = Dropout(dropout[0])(y)
         y = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(y)
-        y = Activation(activation[1])(y)
-        y = BatchNormalization()(y)
-        y = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(y)
-        Branch2 = Activation(activation[1], name='Branch2')(y)
+        y = Activation(activation[0])(y)
+        #y = BatchNormalization()(y)
+        y = Dropout(dropout[0])(y)
+        y = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(y)
+        y = Activation(activation[0])(y)
+        #y = BatchNormalization()(y)
+        y = Dropout(dropout[0])(y)
+        y1 = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(y)
+        Branch2 = Activation(activation[2], name='Branch2')(y1)
 
         # Branch 3   ------
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
-        z = Activation(activation[1])(z)
-        z = BatchNormalization()(z)
+        z = Activation(activation[0])(z)
+        #z = BatchNormalization()(z)
+        z = Dropout(dropout[0])(z)
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(z)
-        z = Activation(activation[1])(z)
-        z = BatchNormalization()(z)
-        z = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(z)
-        Branch3 = Activation(activation[1], name='Branch3')(z)
+        z = Activation(activation[0])(z)
+        #z = BatchNormalization()(z)
+        z = Dropout(dropout[0])(z)
+        z = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(z)
+        z = Activation(activation[0])(z)
+        #z = BatchNormalization()(z)
+        z = Dropout(dropout[0])(z)
+        z1 = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(z)
+        Branch3 = Activation(activation[2], name='Branch3')(z1)
 
         # Merge branches
-        merge = Concatenate(axis=-1)([Branch1,Branch2,Branch3])
-        w = Dense(units=full_conn[2], kernel_initializer=kernel_init, use_bias=False)(merge)
+        merge = Concatenate(axis=-1)([x,y,z]) #([Branch1,Branch2,Branch3])
+        w = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(merge)
         w = Activation(activation[1])(w)
+        w = Dropout(dropout[0])(w)
         w = BatchNormalization()(w)
-        w = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(w)
-        output = Activation(activation[1], name='output')(w)
+        w = Dense(units=full_conn[1], kernel_initializer=kernel_init, use_bias=False)(w)
+        output = Activation(activation[2], name='output')(w)
 
 
         model = Model(inputs=input, outputs=[Branch1,Branch2,Branch3,output], name='MultiBranchNetwork')
         #model.summary()
 
 
-        opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
-        # opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
+        #opt = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+        opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=None, schedule_decay=0.004)
 
         # Losses
         # ['mean_squared_error', 'mean_absolute_error','mean_squared_logarithmic_error']
-        loss = {'Branch1' : ['mean_squared_error'],
-                'Branch2' : ['mean_squared_error'],
-                'Branch3' : ['mean_squared_error'],
-                'output'  : ['mean_squared_error']}
+        loss = {'Branch1' : 'mean_squared_error',
+                'Branch2' : 'mean_squared_error',
+                'Branch3' : 'mean_squared_error',
+                'output'  : 'mean_squared_error'}
 
-        lossWeights = { 'Branch1' : 1.0,
-                        'Branch2' : 1.0,
-                        'Branch3' : 1.0,
-                        'output'  : 1.0,}
+        lossWeights = { 'Branch1' : .15,
+                        'Branch2' : .15,
+                        'Branch3' : .15,
+                        'output'  : 1.0}
 
         # Metrics
-        metrics = ['mse', SMAPE]  # and loss
+        metrics = [SMAPE]  # and loss
         keras.objectives.custom_loss = SMAPE
 
 
     else:
         print('No valid model has been selected')
 
-    model.summary()                     # print details of the neural network
+    #model.summary()                     # print details of the neural network
 
     # Optimizer setup --------------------------------------------------------------------------------------------------
 
-    model.compile(optimizer = opt,
-                  loss      = 'mae',    # mean absolute error
-                  metrics   = metrics)  # additional metric of analysis
+    model.compile(optimizer     = opt,
+                  loss          = loss,
+                  loss_weights  = lossWeights,
+                  metrics       = metrics)  # additional metric of analysis
+
+
     # purposes, but still usefull in debugging
 
 
@@ -560,33 +584,40 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
                             shuffle         =False,                  # data is not shuffled from epoch to epoch.
                             callbacks       =[tbCallback]) # save graph and other data for visualization with tensorboard.
     elif arch_type == 1:
-        history = model.fit(x=X_train,  # X data
-                            y=y_train,  # Y data
-                            epochs=training_epochs,  # number of fit iteration across all training set
-                            batch_size=batch_size,  # number of training samples preprocessed in parallel.
-                            verbose=2,  # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
-                            # validation_split=0.2,                   # float (0. < x < 1). Fraction of the data to use as held-out validation data.
-                            validation_data=(X_val, y_val),
-                            shuffle=False,  # data is not shuffled from epoch to epoch.
-                            callbacks=[tbCallback])  # save graph and other data for visualization with tensorboard.
+        history = model.fit(x               =X_train,  # X data
+                            y               ={'Branch1':y_train_opt1, 'Branch2':y_train_opt2,
+                                              'Branch3':y_train_opt3, 'output':y_train },  # Y data
+                            epochs          =training_epochs,       # number of fit iteration across all training set
+                            batch_size      =batch_size,            # number of training samples preprocessed in parallel.
+                            verbose         =2,                     # 0 for no logging, 1 for progress bar logging, 2 for one log line per epoch.
+                            validation_data =(X_val, {'Branch1':y_val_opt1, 'Branch2':y_val_opt2,
+                                             'Branch3':y_val_opt3, 'output':y_val }),
+                            shuffle         =False,  # data is not shuffled from epoch to epoch.
+                            callbacks       =[tbCallback])  # save graph and other data for visualization with tensorboard.
 
-    score = model.evaluate(X_train, y_train, verbose=0, batch_size=batch_size)
-    print('\nTraining loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
-          ' SMAPE='+"{0:.3f}".format(score[2]))
+    score = model.evaluate(x=X_train, y={'Branch1':y_train_opt1, 'Branch2':y_train_opt2,
+                                         'Branch3':y_train_opt3, 'output':y_train }, verbose=0, batch_size=batch_size)
+    # print('\nTraining loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
+    #       ' SMAPE='+"{0:.3f}".format(score[2]))
+    print('\nTraining loss: mse= ' + "{0:.2e}".format(score[0]) + ', and metrics SMAPE=' + "{0:.3f}".format(score[-1]))
 
-    score = model.evaluate(X_val, y_val, verbose=0, batch_size=batch_size)
-    print('Validation loss: mae= '+"{0:.2e}".format( score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
-          ' SMAPE= '+"{0:.2f}".format(score[2]))
+    score = model.evaluate(x=X_val, y={'Branch1':y_val_opt1, 'Branch2':y_val_opt2,
+                                       'Branch3':y_val_opt3, 'output':y_val }, verbose=0, batch_size=batch_size)
+    # print('Validation loss: mae= '+"{0:.2e}".format( score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+
+    #       ' SMAPE= '+"{0:.2f}".format(score[2]))
+
+    print('Validation loss: mse= ' + "{0:.2e}".format(score[0]) + ', and metrics SMAPE= ' + "{0:.2f}".format(score[-1]))
 
     # Model saving -----------------------------------------------------------------------------------------------------
     model.save(output_path +sep+ 'models'+sep+'RNN_model_'+str(num_model)+'.pkl')  # save model within the directory specified by path
+    plot_model(model, to_file=output_path +sep+ 'images'+sep+'Network_model_plot.pdf')
 
     # Tensorboard invocation -------------------------------------------------------------------------------------------
     #system('tensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1')
-    print('\mtensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1\n')
+    print('\ntensorboard --logdir=' + output_path +sep+ 'models --host=127.0.0.1\n')
 
 
-def model_test(X,y,num_model):
+def model_test(X,y,num_model, arch_type, opt_data):
     '''
     The function perform the test score assessment, and plots the true signal vs the predicted one, for each model trained.
     :param X:
@@ -598,16 +629,22 @@ def model_test(X,y,num_model):
     print('Testing model ' + str(num_model))
     # Performances evaluation ------------------------------------------------------------------------------------------
     model = load_model(output_path + sep + 'models' + sep + 'RNN_model_'+str(num_model)+'.pkl', custom_objects={'SMAPE': SMAPE})
-    score = model.evaluate(X, y, verbose=0, batch_size=2)
-    print('Test loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+ ' SMAPE= '+
-          "{0:.2f}".format( score[2]) + '\n')
+    #score = model.evaluate(X, y, verbose=0, batch_size=2)
+    #print('Test loss: mae= '+"{0:.2e}".format(score[0])+ ', and metrics mse= '+"{0:.2e}".format(score[1])+ ' SMAPE= '+
+    #      "{0:.2f}".format( score[2]) + '\n')
 
     # Predictions visualization ----------------------------------------------------------------------------------------
     if not path.exists(output_path + sep + 'images' + sep + 'predictions'):  # create directory is not present
         makedirs(output_path + sep + 'images' + sep+ 'predictions')
 
+    print(X.shape,X[0::y.shape[1]].shape,y.shape, y[0::y.shape[1]].shape, model.predict(X[0::y.shape[1]])[-1].shape)
+
     y_new = np.reshape(y[0::y.shape[1]],-1)
-    y_hat = np.reshape(model.predict(X[0::y.shape[1]]),-1)
+    y_hat = []
+    if not arch_type:
+        y_hat = np.reshape(model.predict(X[0::y.shape[1]]), -1)
+    else:
+        y_hat = np.reshape(model.predict(X[0::y.shape[1]])[-1],-1)
 
     plt.figure()
     plt.xlabel('Days'), plt.ylabel('Income'), plt.title('Prediction comparison')
@@ -724,6 +761,7 @@ if __name__ == '__main__':
     montly_view = False
     filter      = True
     ensemble    = True
+    train       = True
     nan_rm_tech = 2     # technique for nan removal, 0 mean of all vlaue, 1- meadi of all value, 2- mean of pre
                         # and post vale 3- windowed mean
     arch_type = 1
@@ -773,25 +811,31 @@ if __name__ == '__main__':
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-    model_training(X_train, X_val, y_train, y_val, w_size,  num_model=1, arch_type=arch_type, opt_data=opt)
-    if ensemble:    # if ensemble is enalble then we train also the two additional models
-       model_training(X_train2, X_val2, y_train2, y_val2, w_size2, num_model=2, arch_type=arch_type, opt_data=[])
-       model_training(X_train3, X_val3, y_train3, y_val3, w_size3, num_model=3, arch_type=arch_type, opt_data=[])
+    if train:
+        if not arch_type:
+            model_training(X_train, X_val, y_train, y_val, w_size, num_model=1, arch_type=arch_type, opt_data=opt)
+            if ensemble:    # if ensemble is enalble then we train also the two additional models
+               model_training(X_train2, X_val2, y_train2, y_val2, w_size2, num_model=2, arch_type=arch_type, opt_data=[])
+               model_training(X_train3, X_val3, y_train3, y_val3, w_size3, num_model=3, arch_type=arch_type, opt_data=[])
+        else:
+            model_training(X_train, X_val, y_train, y_val, w_size_branch, num_model=1, arch_type=arch_type, opt_data=opt)
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t)+ ' seconds.')
     t = time.time()
 
-    model_test(X_test, y_test, num_model=1)
-    if ensemble:
-        model_test(X_test2, y_test2, num_model=2)
-        model_test(X_test3, y_test3, num_model=3)
+    if not arch_type:
+        model_test(X_test, y_test, num_model=1, arch_type=arch_type, opt_data=opt)
+        if ensemble:
+            model_test(X_test2, y_test2, num_model=2, arch_type=arch_type, opt_data=opt)
+            model_test(X_test3, y_test3, num_model=3, arch_type=arch_type, opt_data=opt)
+    else:
+        model_test(X_test, y_test, num_model=1, arch_type=arch_type, opt_data=opt)
 
     print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
     t = time.time()
 
-    recursive_prediction( np.reshape(income_new,-1), idx, w_size, w_size2, w_size3, ensemble)
-
-
-    print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
+    if not arch_type:
+        recursive_prediction( np.reshape(income_new,-1), idx, w_size, w_size2, w_size3, ensemble)
+        print('Performed in ' + "{0:.2f}".format(time.time() - t) + ' seconds.')
 
     # to load: scaler = joblib.load(output+sep+'models'+sep+'scaler.pkl)'
