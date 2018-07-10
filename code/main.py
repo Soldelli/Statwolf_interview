@@ -389,7 +389,7 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
     input_window_size  = w_size[0]  # number of samples per channel used to feed the NN
     output_window_size = w_size[1]
     batch_size         = 4
-    training_epochs    = 1
+    training_epochs    = 50
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
     RNN_neurons = [50, 50]  # Defines the number of neurons of the recurrent layers
@@ -521,7 +521,7 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         w = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(merge)
         w = Activation(activation[1])(w)
         w = Dropout(dropout[0])(w)
-        w = BatchNormalization()(w)
+        #w = BatchNormalization()(w)
         w = Dense(units=full_conn[1], kernel_initializer=kernel_init, use_bias=False)(w)
         output = Activation(activation[2], name='output')(w)
 
