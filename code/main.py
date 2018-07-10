@@ -389,7 +389,7 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
     input_window_size  = w_size[0]  # number of samples per channel used to feed the NN
     output_window_size = w_size[1]
     batch_size         = 4
-    training_epochs    = 50
+    training_epochs    = 1
 
     # Neural Network parameters ----------------------------------------------------------------------------------------
     RNN_neurons = [50, 50]  # Defines the number of neurons of the recurrent layers
@@ -465,12 +465,13 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         input = Input(shape=(input_window_size, num_features))
 
         #Branch 1   ------
-        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
+        #x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
+        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(input)
         x = Activation(activation[0])(x)
         #x = BatchNormalization()(x)
-        x = Dropout(dropout[0])(x)
-        x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
-        x = Activation(activation[0])(x)
+        #x = Dropout(dropout[0])(x)
+        #x = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(x)
+        #x = Activation(activation[0])(x)
         #x = BatchNormalization()(x)
         x = Dropout(dropout[0])(x)
         x = Dense(units=full_conn[3], kernel_initializer=kernel_init, use_bias=False)(x)
@@ -500,6 +501,9 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(input)
         z = Activation(activation[0])(z)
         #z = BatchNormalization()(z)
+        z = Dropout(dropout[0])(z)
+        z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False,return_sequences=True)(z)
+        z = Activation(activation[0])(z)
         z = Dropout(dropout[0])(z)
         z = GRU(units=RNN_neurons[0], kernel_initializer=kernel_init, use_bias=False)(z)
         z = Activation(activation[0])(z)
@@ -536,10 +540,10 @@ def model_training(X_train, X_val, y_train, y_val, w_size, num_model, arch_type,
                 'Branch3' : 'mean_squared_error',
                 'output'  : 'mean_squared_error'}
 
-        lossWeights = { 'Branch1' : .15,
-                        'Branch2' : .15,
-                        'Branch3' : .15,
-                        'output'  : 1.0}
+        lossWeights = { 'Branch1' : .3,
+                        'Branch2' : .6,
+                        'Branch3' : 1.0,
+                        'output'  : .3}
 
         # Metrics
         metrics = [SMAPE]  # and loss
